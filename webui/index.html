@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyCLIP WebUI</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="topbar"></header>
+
+<div id="main">
+	<aside id="sidebar">
+
+		<section class="panel">
+			<h2>Search Scope</h2>
+			<div class="row">
+				<select id="scope-select"><option value="">All images</option></select>
+				<span id="scope-count" title="Images in scope"></span>
+			</div>
+		</section>
+
+		<section class="panel">
+			<h2>Text Prompts</h2>
+			<div id="prompt-list"></div>
+			<button id="add-prompt" class="btn">+ Add Prompt</button>
+		</section>
+
+		<section class="panel">
+			<h2>Reference Images</h2>
+			<div id="ref-list"></div>
+			<div id="drop-zone" class="drop-zone">Drop images here or
+				<label class="link">browse<input type="file" id="ref-file-input" accept="image/*" multiple hidden></label>
+			</div>
+			<div class="row">
+				<input type="text" id="ref-id-input" placeholder="Hydrus file hash (sha256)">
+				<button id="add-ref-by-id" class="btn small">Add</button>
+			</div>
+		</section>
+
+		<section class="panel">
+			<h2>Results</h2>
+			<div class="row">
+				<label for="count-input">Count</label>
+				<input type="number" id="count-input" min="5" max="500" step="5" value="100">
+			</div>
+		</section>
+
+		<button id="search-btn" class="btn primary">SEARCH</button>
+		<button id="clear-btn" class="btn">Clear All</button>
+
+	</aside>
+
+	<main id="results-area">
+		<div id="results-toolbar">
+			<span id="results-info">No results</span>
+			<span id="selection-bar" hidden>
+				<span id="selection-count"></span>
+				<select id="bucket-action-select"><option value="">Add to bucket…</option></select>
+				<button id="use-as-refs" class="btn small">Use as references</button>
+				<button id="clear-selection" class="btn small">Clear selection</button>
+			</span>
+			<span class="spacer"></span>
+			<label for="thumb-size">Size</label>
+			<input type="range" id="thumb-size" min="100" max="500" value="300">
+			<select id="fit-select" title="Thumbnail rendering">
+				<option value="fit" selected>Fit</option>
+				<option value="cover">Crop</option>
+			</select>
+		</div>
+		<div id="grid"></div>
+	</main>
+</div>
+
+<footer id="statusbar">Ready</footer>
+
+<div id="overlay" hidden>
+	<button id="viewer-prev" class="viewer-nav" title="Previous (←)">‹</button>
+	<img id="overlay-img" alt="">
+	<button id="viewer-next" class="viewer-nav" title="Next (→)">›</button>
+</div>
+
+<div id="ctx-menu" hidden></div>
+
+<img id="hover-preview" hidden alt="">
+
+<script src="shared.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

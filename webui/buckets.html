@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyCLIP — Buckets</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="topbar"></header>
+
+<main class="page">
+
+	<section class="panel">
+		<h2>Buckets</h2>
+		<div id="bucket-list"></div>
+		<div class="row">
+			<input type="text" id="bucket-name-input" placeholder="New bucket name">
+			<button id="create-bucket" class="btn small">Create</button>
+		</div>
+		<p class="hint">Adding to a bucket that has already been searched won't show up in its results until the server restarts.</p>
+	</section>
+
+	<section class="panel">
+		<h2>Add hashes to bucket</h2>
+		<div class="row">
+			<select id="bucket-select"></select>
+		</div>
+		<textarea id="hash-input" rows="10" placeholder="One hydrus sha256 hash per line"></textarea>
+		<div class="row">
+			<button id="add-hashes" class="btn primary">Add to bucket</button>
+		</div>
+		<p class="hint">Files already ingested are added immediately; the rest are queued for ingest — re-add them once the queue has been processed (Ingest page).</p>
+		<div id="add-result"></div>
+	</section>
+
+</main>
+
+<footer id="statusbar">Ready</footer>
+
+<script src="shared.js"></script>
+<script src="buckets.js"></script>
+</body>
+</html>

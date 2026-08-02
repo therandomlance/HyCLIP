@@ -1,0 +1,7 @@
+.venv
+__pycache__
+test/test_images/*
+test/test.db
+hyclip.db
+server.log
+TODO.md
