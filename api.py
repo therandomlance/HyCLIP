@@ -245,7 +245,7 @@ def num_embeddings():
 
 @app.post("/search")
 def search(req: SearchRequest):
-	return db.search_global(req.embedding, req.num_results)
+	return db.search_global(req.embedding, model.dims, req.num_results)
 
 @app.post("/search_bucket")
 def search_bucket(req: SearchBucketRequest):

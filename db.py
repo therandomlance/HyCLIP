@@ -186,8 +186,8 @@ class HyCLIP_DB:
 
 	# ========== Search ==========
 	# ===== Global Search =====
-	def search_global(self, embedding:list[float], num_results=100) -> list[tuple[int, float]]:
-		self.quant_prepare("embeddings")
+	def search_global(self, embedding:list[float], model_dims, num_results=100) -> list[tuple[int, float]]:
+		self.quant_prepare("embeddings", model_dims)
 
 		Q = f'''
 			SELECT hash_id, v.distance
@@ -294,9 +294,8 @@ class HyCLIP_DB:
 	# TODO Make sure these old methods still work with the new DB
 	# TODO find a way to check current quant status
 
-	def quant_prepare(self, table_name:str):
+	def quant_prepare(self, table_name:str, model_dims:int=768):
 		# TODO get model dims from config
-		model_dims = 768
 		self.vector_init(table_name, model_dims)
 		self.vector_quantize(table_name)
 		self.quantize_preload(table_name)
