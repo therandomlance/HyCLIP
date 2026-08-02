@@ -27,8 +27,8 @@ function status(msg) { $("#statusbar").textContent = msg; }
 const PAGES = [
 	["index.html", "Search"],
 	["buckets.html", "Buckets"],
-	["config.html", "Config"],
 	["ingest.html", "Ingest"],
+	["config.html", "Config"],
 ];
 
 async function refreshModelStatus() {
