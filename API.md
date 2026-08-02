@@ -197,6 +197,17 @@ Delete a bucket and its temp search table.
 
 ## Embeddings
 
+### `GET /get_embedding`
+Fetch the stored embedding for a `hash_id` (`embed_dim` floats). **404** if unknown.
+
+**Query params:** `hash_id`
+
+### `POST /eval_image_upload`
+Evaluate raw uploaded image bytes into an embedding (same response shape as `eval_image`). Body is the raw image file. If the optional `hash_id` query param is given and already ingested, returns the stored embedding instead — no model required.
+
+**Query params:** `hash_id` (optional)
+
+
 ### `POST /delete_hash`
 Delete an embedding and its bucket memberships.
 
@@ -344,13 +355,3 @@ Resolve sha256 hashes via hydrus: already-ingested files are added to the bucket
 {"added": 3, "pending": [{"hash_id": 222, "path": "/media/img/b.jpg"}], "already_queued": 1, "unknown": ["<sha256>", ...]}
 ```
 `already_queued` counts how many `pending` files are also sitting in the ingest queue (ingesting them dequeues them). `unknown` lists hashes hydrus didn't recognize.
-
-### `GET /get_embedding`
-Fetch the stored embedding for a `hash_id` (`embed_dim` floats). **404** if unknown.
-
-**Query params:** `hash_id`
-
-### `POST /eval_image_upload`
-Evaluate raw uploaded image bytes into an embedding (same response shape as `eval_image`). Body is the raw image file. If the optional `hash_id` query param is given and already ingested, returns the stored embedding instead — no model required.
-
-**Query params:** `hash_id` (optional)
