@@ -52,8 +52,10 @@ $("#add-hashes").onclick = async () => {
 	$("#add-hashes").disabled = true;
 	const bar = $("#add-progress");
 	const counts = $("#add-counts");
+	const step = $("#add-step");
 	bar.hidden = true;
 	counts.textContent = "";
+	step.textContent = "Step 1: Resolving hashes…";
 	status(`Resolving ${hashes.length} hash(es)…`);
 	try {
 		const r = await post("/add_hashes_to_bucket", { bucket_id: Number(bucketId), hashes });
@@ -63,6 +65,13 @@ $("#add-hashes").onclick = async () => {
 		const BATCH = 20;
 		let ingested = 0, skipped = 0, errors = 0;
 		if (pending.length) {
+			step.textContent = "Step 2: Ingesting new images…";
+			const ms = await api("/model_status");
+			if (!ms.loaded) {
+				status("Loading model…");
+				await api("/load_model", { method: "POST" });
+				refreshModelStatus();
+			}
 			bar.hidden = false;
 			bar.max = pending.length;
 			bar.value = 0;
@@ -70,17 +79,7 @@ $("#add-hashes").onclick = async () => {
 		for (let i = 0; i < pending.length; i += BATCH) {
 			const chunk = pending.slice(i, i + BATCH);
 			status(`Ingesting ${Math.min(i + BATCH, pending.length)}/${pending.length}…`);
-			let results;
-			try {
-				results = await post("/ingest_image_batch", { items: chunk });
-			} catch (e) {
-				if (e.status === 409) {
-					status("Model not loaded — load it in the top bar, then re-add");
-					$("#add-hashes").disabled = false;
-					return;
-				}
-				throw e;
-			}
+			const results = await post("/ingest_image_batch", { items: chunk });
 			const newIds = [];
 			for (const res of results) {
 				if (res.status === "ingested") newIds.push(res.hash_id);
@@ -109,6 +108,7 @@ $("#add-hashes").onclick = async () => {
 		status("Done");
 		refreshBuckets();
 	} catch (e) { status(`Error: ${e.message}`); }
+	step.textContent = "";
 	$("#add-hashes").disabled = false;
 };
 
