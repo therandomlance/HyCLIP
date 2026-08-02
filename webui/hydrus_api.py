@@ -125,10 +125,10 @@ def build_router(db, model, config):
 
 	@router.post("/add_hashes_to_bucket")
 	def add_hashes_to_bucket(req: AddHashesToBucketRequest):
-		"""Resolve sha256 hashes via hydrus: add ingested ones to the bucket, queue the rest for ingest."""
+		"""Resolve sha256 hashes via hydrus: add ingested ones to the bucket, return the rest for the client to ingest."""
 		hashes = [h.strip() for h in req.hashes if h.strip()]
 		if not hashes:
-			return {"added": 0, "enqueued": 0, "unknown": []}
+			return {"added": 0, "pending": [], "already_queued": 0, "unknown": []}
 		hydrus = _hydrus()
 		try:
 			meta = hydrus.get_file_metadata(hashes=hashes, only_return_identifiers=True).get("metadata", [])
@@ -146,8 +146,9 @@ def build_router(db, model, config):
 		ingested = [fid for fid in known.values() if db.exists_hash_id(fid) and fid not in members]
 		if ingested:
 			db.add_to_bucket(req.bucket_id, ingested)
+			db.dequeue_hashes(ingested)
 
-		to_enqueue = []
+		pending = []
 		for fid in known.values():
 			if db.exists_hash_id(fid):
 				continue
@@ -155,10 +156,10 @@ def build_router(db, model, config):
 				path = hydrus.get_file_path(file_id=fid)["path"]
 			except Exception:
 				continue
-			to_enqueue.append((fid, path))
-		if to_enqueue:
-			db.enqueue_hashes(to_enqueue)
+			pending.append({"hash_id": fid, "path": path})
 
-		return {"added": len(ingested), "enqueued": len(to_enqueue), "unknown": unknown}
+		already_queued = len(db.get_queued_ids([p["hash_id"] for p in pending]))
+
+		return {"added": len(ingested), "pending": pending, "already_queued": already_queued, "unknown": unknown}
 
 	return router

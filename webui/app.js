@@ -242,6 +242,7 @@ function displayResults(results) {
 	state.results = results;
 	clearSelection();
 	$("#grid").replaceChildren();
+	$("#grid").scrollTop = 0;
 	$("#results-info").textContent = results.length ? `${results.length} result(s)` : "No results";
 
 	for (const [idx, res] of results.entries()) {

@@ -140,6 +140,7 @@ def ingest_image(req: IngestRequest):
 
 	db.insert_embedding(req.hash_id, embedding)
 	db.commit()
+	db.dequeue_hashes([req.hash_id])
 
 	return {"hash_id": req.hash_id, "status": "ingested"}
 
@@ -166,6 +167,7 @@ def ingest_image_batch(req: IngestBatchRequest):
 	for hash_id, embedding in embeddings:
 		db.insert_embedding(hash_id, embedding)
 	db.commit()
+	db.dequeue_hashes([hash_id for hash_id, _ in embeddings])
 
 	return results
 
@@ -214,8 +216,8 @@ def create_bucket(req: CreateBucketRequest):
 @app.post("/insert_into_bucket")
 def insert_into_bucket(req: InsertBucketRequest):
 	# TODO add options for non-inserted hash_ids: strict, loose, deferred
-	db.add_to_bucket(req.bucket_id, req.hash_ids)
-	return {"bucket_id": req.bucket_id, "inserted": len(req.hash_ids)}
+	unknown = db.add_to_bucket(req.bucket_id, req.hash_ids)
+	return {"bucket_id": req.bucket_id, "inserted": len(req.hash_ids) - len(unknown), "unknown": unknown}
 
 @app.get("/list_buckets")
 def list_buckets():
@@ -249,7 +251,7 @@ def search(req: SearchRequest):
 
 @app.post("/search_bucket")
 def search_bucket(req: SearchBucketRequest):
-	return db.search_bucket(req.embedding, req.bucket_id, req.num_results)
+	return db.search_bucket(req.embedding, req.bucket_id, model.dims, req.num_results)
 
 
 # ===== Config =====

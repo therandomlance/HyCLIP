@@ -14,7 +14,7 @@ TEST_DIR = Path(__file__).resolve().parent
 IMG_DIR = TEST_DIR / "test_images"
 DB_PATH = TEST_DIR / "test.db"
 
-EMB_DIM = 768  # must match quant_prepare's hardcoded dims
+EMB_DIM = 768  # must match the dims of the model used to generate embeddings
 N_FIXTURES = 6
 
 
@@ -69,19 +69,24 @@ def main():
 	assert db.get_bucket_size(bucket_id) == 4, "wrong bucket size"
 	assert db.get_bucket_name(bucket_id) == "test-bucket"
 
+	# un-ingested hash_ids are skipped and returned, not an error
+	unknown = db.add_to_bucket(bucket_id, [99999])
+	assert unknown == [99999], f"expected [99999] unknown, got {unknown}"
+	assert db.get_bucket_size(bucket_id) == 4, "unknown id should not be added"
+
 	members = db.get_bucket_members(bucket_id)
 	assert len(members) == 4, "wrong member count"
 	assert set(members) == set(hash_ids[:4]), "members don't match"
 
 	# ---- global search ----
 	db.quant_prepare("embeddings")
-	results = db.search_global(make_embedding(0), num_results=3)
+	results = db.search_global(make_embedding(0), EMB_DIM, num_results=3)
 	assert len(results) == 3, f"expected 3 results, got {len(results)}"
 	dists = [d for _, d in results]
 	assert dists == sorted(dists), "results not ordered by distance"
 
 	# ---- bucket search ----
-	db.init_bucket(bucket_id)
+	db.init_bucket(bucket_id, EMB_DIM)
 	assert db.bucket_is_init(bucket_id), "bucket should be initialized"
 	bucket_results = db.search_bucket(make_embedding(1), bucket_id, num_results=2)
 	assert len(bucket_results) == 2, "bucket search should return requested count"
@@ -90,6 +95,8 @@ def main():
 	# ---- queue ----
 	db.enqueue_hashes([(hash_ids[0], str(images[0])), (hash_ids[1], str(images[1]))])
 	assert db.get_num_queue() == 2, "queue count mismatch"
+	assert db.get_queued_ids([hash_ids[0], 99999]) == {hash_ids[0]}, "queue membership check wrong"
+	assert db.get_queued_ids([]) == set(), "empty lookup should be empty set"
 
 	# ---- removal ----
 	db.remove_embedding(hash_ids[-1])

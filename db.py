@@ -142,14 +142,16 @@ class HyCLIP_DB:
 	def add_to_bucket(self, bucket_id:int, hash_ids:list[int]):
 		self._assert_bucket_id(bucket_id)
 
-		for hash_id in hash_ids:
-			self._assert_hash_id(hash_id)
+		unknown_hashes = [hash_id for hash_id in hash_ids if not self.exists_hash_id(hash_id)]
+		hash_ids = [hash_id for hash_id in hash_ids if hash_id not in unknown_hashes]
 
 		Q = "INSERT INTO bucket_members (bucket_id, hash_id) VALUES ( ?, ? )"
 		A = [(bucket_id, X) for X in hash_ids]
 		self.DB.executemany(Q, A)
 		
 		self.commit()
+
+		return unknown_hashes
 
 	def remove_bucket(self, bucket_id):
 		self._assert_bucket_id(bucket_id)
@@ -184,6 +186,9 @@ class HyCLIP_DB:
 	def exists_bucket(self, bucket_id:int) -> bool:
 		return self._exists("buckets", ("bucket_id", bucket_id))
 
+	def exists_bucket_member(self, bucket_id:int, hash_id:int) -> bool:
+		return bool(self.qe("SELECT EXISTS ( SELECT 1 FROM bucket_members WHERE bucket_id = ? AND hash_id = ? )", [bucket_id, hash_id]))
+
 	# ========== Search ==========
 	# ===== Global Search =====
 	def search_global(self, embedding:list[float], model_dims, num_results=100) -> list[tuple[int, float]]:
@@ -204,7 +209,7 @@ class HyCLIP_DB:
 			return []
 
 	# ===== Bucket Search =====
-	def init_bucket(self, bucket_id:int):
+	def init_bucket(self, bucket_id:int, model_dims:int=768):
 		self._assert_bucket_id(bucket_id)
 
 		self.DB.executescript(f'''
@@ -223,7 +228,7 @@ class HyCLIP_DB:
 			WHERE bucket_id = ?
 		''', [bucket_id])
 
-		self.vector_init(f"temp_bucket_{bucket_id}", 768)
+		self.vector_init(f"temp_bucket_{bucket_id}", model_dims)
 		self.vector_quantize(f"temp_bucket_{bucket_id}")
 		self.commit()
 
@@ -232,11 +237,11 @@ class HyCLIP_DB:
 		A = [f"temp_bucket_{bucket_id}"]
 		return bool(self.qe(Q, A))
 
-	def search_bucket(self, embedding:list[float], bucket_id:int, num_results:int=100) -> list[tuple[int, float]]:
+	def search_bucket(self, embedding:list[float], bucket_id:int, model_dims:int=768, num_results:int=100) -> list[tuple[int, float]]:
 		self._assert_bucket_id(bucket_id)
 
 		if not self.bucket_is_init(bucket_id):
-			self.init_bucket(bucket_id)
+			self.init_bucket(bucket_id, model_dims)
 
 		table_name = f'temp_bucket_{bucket_id}'
 
@@ -295,7 +300,6 @@ class HyCLIP_DB:
 	# TODO find a way to check current quant status
 
 	def quant_prepare(self, table_name:str, model_dims:int=768):
-		# TODO get model dims from config
 		self.vector_init(table_name, model_dims)
 		self.vector_quantize(table_name)
 		self.quantize_preload(table_name)
@@ -328,7 +332,7 @@ class HyCLIP_DB:
 
 	# ===== Ingest Queue =====
 	# Persistent queue of files that need to be ingested
-	def enqueue_hashes(self, hashes:list[tuple[int, string]]):
+	def enqueue_hashes(self, hashes:list[tuple[int, str]]):
 		# INSERT OR IGNORE so re-enqueueing between resumed runs is safe
 		self.DB.executemany("INSERT OR IGNORE INTO temp_embedding_queue (hash_id, path) VALUES ( ?, ? )", hashes)
 		self.commit()
@@ -350,3 +354,10 @@ class HyCLIP_DB:
 
 	def get_num_queue(self):
 		return self.qe("SELECT COUNT(*) FROM temp_embedding_queue")
+
+	def get_queued_ids(self, hash_ids:list[int]) -> set[int]:
+		if not hash_ids:
+			return set()
+		marks = ",".join("?" * len(hash_ids))
+		rows = self.DB.execute(f"SELECT hash_id FROM temp_embedding_queue WHERE hash_id IN ({marks})", hash_ids).fetchall()
+		return {r[0] for r in rows}

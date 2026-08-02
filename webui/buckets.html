@@ -31,7 +31,9 @@
 		<div class="row">
 			<button id="add-hashes" class="btn primary">Add to bucket</button>
 		</div>
-		<p class="hint">Files already ingested are added immediately; the rest are queued for ingest — re-add them once the queue has been processed (Ingest page).</p>
+		<progress id="add-progress" value="0" max="1" hidden></progress>
+		<div id="add-counts" class="hint"></div>
+		<p class="hint">Files already ingested are added immediately; the rest are ingested on the spot (requires a loaded model) and then added.</p>
 		<div id="add-result"></div>
 	</section>
 

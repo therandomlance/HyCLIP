@@ -84,6 +84,13 @@ def main():
 	assert all(item["status"] == "ingested" for item in r.json()), r.json()
 	assert api.db.get_num_embeddings() == 4, "expected 4 embeddings after ingest"
 
+	# ingesting removes the file from the persistent queue
+	api.db.enqueue_hashes([(99, str(images[0]))])
+	assert api.db.get_num_queue() == 1
+	r = client.post("/ingest_image_batch", json={"items": [{"hash_id": 99, "path": str(images[0])}]})
+	assert r.json()[0]["status"] == "ingested"
+	assert api.db.get_num_queue() == 0, "ingested file should be dequeued"
+
 	# ---- buckets ----
 	r = client.post("/create_bucket", json={"bucket_name": "test-bucket"})
 	assert r.status_code == 200
@@ -92,6 +99,10 @@ def main():
 
 	r = client.post("/insert_into_bucket", json={"bucket_id": bucket_id, "hash_ids": [1, 10, 11]})
 	assert r.status_code == 200 and r.json()["inserted"] == 3
+
+	# un-ingested hash_ids are skipped and reported, not an error
+	r = client.post("/insert_into_bucket", json={"bucket_id": bucket_id, "hash_ids": [99999]})
+	assert r.status_code == 200 and r.json()["inserted"] == 0 and r.json()["unknown"] == [99999]
 
 	buckets = client.get("/list_buckets").json()
 	assert any(bucket_id in row for row in (buckets if isinstance(buckets[0], list) else [buckets])), buckets

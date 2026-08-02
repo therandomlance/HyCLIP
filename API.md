@@ -45,7 +45,7 @@ Reports whether a model is currently loaded.
 
 ## Eval
 
-Both return an embedding as an array of `768` floats. Requires a loaded model (else **409**).
+Both return an embedding as an array of floats (`768` with the default model; the length comes from the model config's `embed_dim`). Requires a loaded model (else **409**).
 
 ### `POST /eval_image`
 Evaluate an image on disk into an embedding.
@@ -75,7 +75,7 @@ Evaluate text into an embedding.
 
 ## Ingest
 
-Evaluates the file with `HyCLIP_Model.eval_image`, then inserts the embedding with `HyCLIP_DB.insert_embedding` under the client-supplied `hash_id`. Requires a loaded model.
+Evaluates the file with `HyCLIP_Model.eval_image`, then inserts the embedding with `HyCLIP_DB.insert_embedding` under the client-supplied `hash_id`. Requires a loaded model. Successfully ingested files are removed from the ingest queue if present.
 
 Only `jpg`, `jpeg`, `png`, and `webp` files are ingested (checked by filename extension). Any other filetype is returned as `"status": "skipped"` without error and logged to the server console.
 
@@ -116,7 +116,7 @@ Ingest multiple images. Evaluates all pending images first, then inserts all emb
 
 ## Ingest Queue
 
-A persistent queue of `(hash_id, path)` entries, typically fed by the Hydrus proxy (`ingest_enqueue`, `add_hashes_to_bucket`). The client drains it in batches; entries are removed only after processing.
+A persistent queue of `(hash_id, path)` entries, typically fed by the Hydrus proxy (`ingest_enqueue`). The client drains it in batches; entries are removed only after processing.
 
 ### `GET /ingest_status`
 Number of items currently queued.
@@ -155,7 +155,7 @@ Create a persistent group of images to search together.
 ```
 
 ### `POST /insert_into_bucket`
-Add already-ingested `hash_id`s to a bucket.
+Add already-ingested `hash_id`s to a bucket. Un-ingested `hash_id`s are skipped and returned in `unknown` (re-adding an existing member is an error).
 
 **Request**
 ```json
@@ -164,7 +164,7 @@ Add already-ingested `hash_id`s to a bucket.
 
 **Response**
 ```json
-{"bucket_id": 1, "inserted": 3}
+{"bucket_id": 1, "inserted": 2, "unknown": [333]}
 ```
 
 ### `GET /list_buckets`
@@ -307,7 +307,6 @@ Hydrus proxy errors (thumbnail/file/file_path/resolve_hash) are forwarded with H
 
 - `insert_into_bucket` does not refresh a bucket's temp search table. Members added to a bucket that has already been searched won't appear in `search_bucket` results until the server restarts (temp tables are dropped on startup).
 - `search` re-quantizes the whole embeddings table on every call, so it's slow on large libraries; `search_bucket` only pays that cost when its bucket is first searched.
-- `insert_into_bucket` fails if any `hash_id` isn't ingested yet (DB asserts existence).
 
 ## Web UI / Hydrus proxy
 
@@ -333,7 +332,7 @@ Find hydrus files tagged `tag` (default `hyclip:ingest`), enqueue them for inges
 `skipped` counts tagged files with no local path (e.g. trashed/deleted). Drive the queue with `ingest_status`/`ingest_process_batch`.
 
 ### `POST /add_hashes_to_bucket`
-Resolve sha256 hashes via hydrus: already-ingested files are added to the bucket immediately, the rest are enqueued for ingest (so they can be added later). Requires `API_KEY`; **404** if the bucket doesn't exist.
+Resolve sha256 hashes via hydrus: already-ingested files are added to the bucket immediately (and removed from the ingest queue if present); the rest are returned as `pending` for the client to ingest via `ingest_image_batch` and then add via `insert_into_bucket`. Requires `API_KEY`; **404** if the bucket doesn't exist.
 
 **Request**
 ```json
@@ -342,12 +341,12 @@ Resolve sha256 hashes via hydrus: already-ingested files are added to the bucket
 
 **Response**
 ```json
-{"added": 3, "enqueued": 2, "unknown": ["<sha256>", ...]}
+{"added": 3, "pending": [{"hash_id": 222, "path": "/media/img/b.jpg"}], "already_queued": 1, "unknown": ["<sha256>", ...]}
 ```
-`unknown` lists hashes hydrus didn't recognize.
+`already_queued` counts how many `pending` files are also sitting in the ingest queue (ingesting them dequeues them). `unknown` lists hashes hydrus didn't recognize.
 
 ### `GET /get_embedding`
-Fetch the stored embedding for a `hash_id` (768 floats). **404** if unknown.
+Fetch the stored embedding for a `hash_id` (`embed_dim` floats). **404** if unknown.
 
 **Query params:** `hash_id`
 

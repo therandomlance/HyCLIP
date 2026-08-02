@@ -50,13 +50,56 @@ $("#add-hashes").onclick = async () => {
 	if (!hashes.length) return;
 
 	$("#add-hashes").disabled = true;
+	const bar = $("#add-progress");
+	const counts = $("#add-counts");
+	bar.hidden = true;
+	counts.textContent = "";
 	status(`Resolving ${hashes.length} hash(es)…`);
 	try {
 		const r = await post("/add_hashes_to_bucket", { bucket_id: Number(bucketId), hashes });
+
+		// Ingest the pending files in batches, adding each newly-ingested batch to the bucket
+		const pending = r.pending;
+		const BATCH = 20;
+		let ingested = 0, skipped = 0, errors = 0;
+		if (pending.length) {
+			bar.hidden = false;
+			bar.max = pending.length;
+			bar.value = 0;
+		}
+		for (let i = 0; i < pending.length; i += BATCH) {
+			const chunk = pending.slice(i, i + BATCH);
+			status(`Ingesting ${Math.min(i + BATCH, pending.length)}/${pending.length}…`);
+			let results;
+			try {
+				results = await post("/ingest_image_batch", { items: chunk });
+			} catch (e) {
+				if (e.status === 409) {
+					status("Model not loaded — load it in the top bar, then re-add");
+					$("#add-hashes").disabled = false;
+					return;
+				}
+				throw e;
+			}
+			const newIds = [];
+			for (const res of results) {
+				if (res.status === "ingested") newIds.push(res.hash_id);
+				else if (res.status === "skipped") skipped++;
+			}
+			errors += chunk.length - results.length;
+			if (newIds.length) {
+				await post("/insert_into_bucket", { bucket_id: Number(bucketId), hash_ids: newIds });
+				ingested += newIds.length;
+			}
+			bar.value = Math.min(i + BATCH, pending.length);
+			counts.textContent = `${bar.value}/${pending.length} | ingested: ${ingested}  skipped: ${skipped}  errors: ${errors}`;
+		}
+
 		const out = $("#add-result");
 		out.replaceChildren();
 		const summary = document.createElement("p");
-		summary.textContent = `Added ${r.added} to bucket, queued ${r.enqueued} for ingest, ${r.unknown.length} unknown.`;
+		summary.textContent = `Added ${r.added + ingested} to bucket (${r.added} already ingested, ${ingested} newly ingested), ` +
+			`${skipped + errors} failed, ${r.already_queued} were already in the ingest queue, ${r.unknown.length} unknown.`;
 		out.append(summary);
 		if (r.unknown.length) {
 			const pre = document.createElement("pre");
