@@ -380,10 +380,16 @@ async function init() {
 
 	addPrompt();
 	$("#count-input").value = cfg.SEARCH_LIMIT ?? 100;
+	$("#thumb-size").value = cfg.THUMB_SIZE ?? 300;
 	$("#grid").classList.toggle("fit", $("#fit-select").value === "fit");
 
-	const applyThumb = () => $("#grid").style.setProperty("--thumb", $("#thumb-size").value + "px");
+	const applyThumb = () => {
+		$("#grid").style.setProperty("--thumb", $("#thumb-size").value + "px");
+		$("#thumb-size-val").textContent = $("#thumb-size").value;
+	};
 	applyThumb();
+
+	const saveCfg = (updates) => post("/update_config", { updates }).catch((e) => status(`Config: ${e.message}`));
 
 	$("#add-prompt").onclick = () => { addPrompt(); };
 	$("#search-btn").onclick = performSearch;
@@ -398,6 +404,8 @@ async function init() {
 		status("Cleared");
 	};
 	$("#thumb-size").oninput = () => { applyThumb(); };
+	$("#thumb-size").onchange = () => saveCfg({ THUMB_SIZE: parseInt($("#thumb-size").value) });
+	$("#count-input").onchange = () => saveCfg({ SEARCH_LIMIT: parseInt($("#count-input").value) || 100 });
 	$("#fit-select").onchange = () => {
 		$("#grid").classList.toggle("fit", $("#fit-select").value === "fit");
 	};
