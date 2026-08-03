@@ -86,11 +86,13 @@ function buildTopbar() {
 
 	const group = document.createElement("div");
 	group.className = "tb-group";
-	group.innerHTML = `<span id="model-dot" class="dot off"></span>
+	group.innerHTML = `
+		<span id="hydrus-dot" class="dot off"></span>
+		<span id="hydrus-name">…</span>
+		<span id="model-dot" class="dot off"></span>
 		<span id="model-name">…</span>
 		<button id="model-toggle" class="btn small">Load model</button>
-		<span id="hydrus-dot" class="dot off"></span>
-		<span id="hydrus-name">…</span>`;
+		`;
 
 	const nav = document.createElement("nav");
 	nav.className = "tb-group tb-tabs";
