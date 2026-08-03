@@ -164,14 +164,13 @@ class HyCLIP_DB:
 	def remove_from_bucket(self, bucket_id:int, hash_ids:list[int]):
 		self._assert_bucket_id(bucket_id)
 		Q = "DELETE FROM bucket_members WHERE bucket_id = ? AND hash_id = ?"
-		A = [(bucket_id, X) for X in hash_ids]
+		A = [(bucket_id, X) for X in hash_ids if self.exists_bucket_member(bucket_id, X)]
 		self.DB.executemany(Q, A)
 		
-		# Removing from an init bucket if it exists
+		# Keep an init'd bucket's temp search table in sync (no bucket_id column there)
 		if self.bucket_is_init(bucket_id):
-			Q = f"DELETE FROM temp_bucket_{bucket_id} WHERE bucket_id = ? AND hash_id = ?"
-			self.DB.execute(Q, A)
-			
+			self.DB.executemany(f"DELETE FROM temp_bucket_{bucket_id} WHERE hash_id = ?", [(X,) for X in hash_ids])
+
 		self.quant_status = "needs_quant"
 		self.commit()
 
@@ -196,7 +195,7 @@ class HyCLIP_DB:
 			return []
 
 	def get_bucket_membership(self, hash_id:int) -> list[int]:
-		self._assert_hash_id(hash_id)
+		# unknown/un-ingested hash is in no buckets
 		members = self._get("bucket_id", "bucket_members", ("hash_id", hash_id))
 		if members:
 			return [members] if isinstance(members, int) else members
@@ -227,7 +226,7 @@ class HyCLIP_DB:
 	# ========== Search ==========
 	# ===== Global Search =====
 	def search_global(self, embedding:list[float], model_dims, num_results=100) -> list[tuple[int, float]]:
-		if self.quant_status != "ready" or self.last_search == "bucket":
+		if self.quant_status != "ready" or self.last_search != "global":
 			self.quant_prepare("embeddings", model_dims)
 
 		Q = f'''
@@ -283,7 +282,7 @@ class HyCLIP_DB:
 
 		table_name = f'temp_bucket_{bucket_id}'
 
-		if self.quant_status != "ready" or self.last_search == "global":
+		if self.quant_status != "ready" or self.last_search != f"bucket_{bucket_id}":
 			self.quant_prepare(table_name, model_dims)
 
 		Q = f'''
@@ -295,7 +294,7 @@ class HyCLIP_DB:
 		'''
 		A = [str(embedding), num_results]
 		results = self.qe(Q, A)
-		self.last_search = "bucket"
+		self.last_search = f"bucket_{bucket_id}"
 		
 		if results:
 			return [results] if isinstance(results, tuple) else results

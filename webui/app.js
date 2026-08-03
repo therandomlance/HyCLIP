@@ -218,7 +218,6 @@ async function performSearch() {
 	if (!hyclip.hasInput) return;
 
 	$("#search-btn").dataset.busy = "1";
-	hyclip.searching = true; // heartbeat polls fast while this is set
 	updateRequires();
 	status("Searching…");
 	try {
@@ -227,9 +226,12 @@ async function performSearch() {
 		if (!vec) { displayResults([]); status("No search inputs"); return; }
 
 		const num = parseInt($("#count-input").value) || 30;
-		const results = state.bucketScope
-			? await post("/search_bucket", { embedding: vec, bucket_id: Number(state.bucketScope), num_results: num })
-			: await post("/search", { embedding: vec, num_results: num });
+		// A search always quantizes when the current scope isn't ready — show it now, sync via heartbeat after.
+		if (effectiveDbStatus() === "needs_quant") applyDbStatus("quantizing");
+		const searchPromise = state.bucketScope
+			? post("/search_bucket", { embedding: vec, bucket_id: Number(state.bucketScope), num_results: num })
+			: post("/search", { embedding: vec, num_results: num });
+		const results = await searchPromise;
 
 		displayResults(results.map(([hashId, dist]) => ({ hashId, dist })));
 		status(`Found ${results.length} result(s)`);
@@ -240,8 +242,8 @@ async function performSearch() {
 			status(`Search error: ${e.message}`);
 		}
 	} finally {
-		hyclip.searching = false;
 		delete $("#search-btn").dataset.busy;
+		pokeHeartbeat(); // re-sync db (and other) status after the search
 		updateRequires();
 	}
 }
@@ -322,20 +324,50 @@ function refreshSelectionUI() {
 	const n = state.selected.size;
 	$("#selection-bar").hidden = n === 0;
 	$("#selection-count").textContent = `${n} selected`;
-	refreshRemoveSelect();
 }
 
-// ponytail: one membership request per selected image; fine for typical (small) selections
-async function refreshRemoveSelect() {
-	const sel = $("#bucket-remove-select");
-	sel.replaceChildren(new Option("Remove from bucket…", ""));
-	if (!state.selected.size) return;
+// Populate the add/remove dropdowns on demand, only when the user opens them, so
+// bucket list/membership calls don't fire on every selection change.
+// ponytail: native dropdowns open before these async options resolve, so a slow
+// server can show just the placeholder on first open; localhost resolves fast.
+function lazyPopulate(el, fn) {
+	el.addEventListener("pointerdown", () => fn().catch(() => {}));
+	el.addEventListener("focus", () => fn().catch(() => {}));
+}
+
+async function populateAddSelect() {
+	const sel = $("#bucket-action-select");
+	if (sel.dataset.busy) return;
+	sel.dataset.busy = "1";
 	try {
-		const lists = await Promise.all([...state.selected].map((id) => api(`/get_bucket_membership?hash_id=${id}`)));
+		const buckets = await api("/list_buckets");
+		sel.replaceChildren(new Option("Add to bucket…", ""));
+		for (const [id, name] of buckets) sel.append(new Option(name, id));
+	} finally {
+		delete sel.dataset.busy;
+	}
+}
+
+async function populateRemoveSelect() {
+	const sel = $("#bucket-remove-select");
+	if (sel.dataset.busy) return;
+	sel.dataset.busy = "1";
+	try {
+		sel.replaceChildren(new Option("Remove from bucket…", ""));
+		if (!state.selected.size) return;
+		const results = await Promise.allSettled(
+			[...state.selected].map((id) => api(`/get_bucket_membership?hash_id=${id}`))
+		);
+		// Drop failed lookups and images in no buckets — they can't constrain a removal
+		const lists = results.filter((r) => r.status === "fulfilled" && r.value.length).map((r) => r.value);
+		if (!lists.length) return;
 		const common = lists.reduce((a, b) => a.filter((x) => b.includes(x)));
+		if (!common.length) return;
 		const buckets = await api("/list_buckets");
 		for (const [id, name] of buckets) if (common.includes(id)) sel.append(new Option(name, id));
-	} catch {}
+	} finally {
+		delete sel.dataset.busy;
+	}
 }
 
 // ===== Context menu =====
@@ -388,12 +420,8 @@ async function refreshBuckets() {
 	for (const [id, name] of buckets) scope.append(new Option(name, id));
 	scope.value = [...scope.options].some((o) => o.value === String(prev)) ? prev : "";
 	state.bucketScope = scope.value;
+	setScope(state.bucketScope);
 
-	const act = $("#bucket-action-select");
-	act.replaceChildren(new Option("Add to bucket…", ""));
-	for (const [id, name] of buckets) act.append(new Option(name, id));
-
-	refreshRemoveSelect(); // bucket names may have changed
 	updateScopeCount();
 }
 
@@ -433,7 +461,7 @@ async function init() {
 	$("#fit-select").onchange = () => {
 		$("#grid").classList.toggle("fit", $("#fit-select").value === "fit");
 	};
-	$("#scope-select").onchange = (e) => { state.bucketScope = e.target.value; updateScopeCount(); };
+	$("#scope-select").onchange = (e) => { state.bucketScope = e.target.value; setScope(state.bucketScope); updateScopeCount(); };
 
 	// Reference image inputs
 	$("#ref-file-input").onchange = (e) => { addRefFiles(e.target.files); e.target.value = ""; };
@@ -459,6 +487,8 @@ async function init() {
 		}
 		clearSelection();
 	};
+	lazyPopulate($("#bucket-action-select"), populateAddSelect);
+	lazyPopulate($("#bucket-remove-select"), populateRemoveSelect);
 	$("#bucket-action-select").onchange = async (e) => {
 		const bucketId = e.target.value;
 		const name = e.target.selectedOptions[0]?.textContent ?? `bucket ${bucketId}`;

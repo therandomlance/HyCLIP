@@ -3,6 +3,7 @@ __pycache__
 test/test_images/*
 test/test.db
 hyclip.db
+hyclip.db-journal
 server.log
 TODO.md
 Screenshot*

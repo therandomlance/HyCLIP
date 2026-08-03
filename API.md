@@ -199,7 +199,7 @@ List the `hash_id`s in a bucket.
 ```
 
 ### `GET /get_bucket_membership`
-Inverse of `list_bucket_members`: list the `bucket_id`s containing a `hash_id`. **404** if the `hash_id` is unknown.
+Inverse of `list_bucket_members`: list the `bucket_id`s containing a `hash_id`. Un-ingested/unknown `hash_id`s return `[]` (they can't be members of any bucket).
 
 **Query params:** `hash_id`
 
@@ -266,9 +266,11 @@ Quantization status of the search index, polled by the web UI's DB status dot. `
 - `"quantizing"` — a search is actively re-quantizing the index; searches block until it finishes
 - `"ready"` — index is quantized and searches run immediately
 
+`last_search` is the scope of the most recent search: `"global"`, `"bucket_<bucket_id>"`, or `null` if none. Because only one table is quantized at a time, `"ready"` is only accurate for the scope named by `last_search` — the web UI compares it against the currently-selected scope.
+
 **Response**
 ```json
-{"quant_status": "ready"}
+{"quant_status": "ready", "last_search": "bucket_3"}
 ```
 
 Takes an embedding (from `eval_image`/`eval_text`) and returns the nearest `hash_id`s ordered by distance (ascending). Both return arrays and auto-initialize their search tables on first use.
@@ -360,7 +362,7 @@ Update one or more config keys and save to disk. Unknown keys are rejected and n
 | 409 | eval/ingest with no loaded model: `{"detail": "model not loaded"}` |
 | 422 | Bad body/query types (Pydantic), or un-evaluable image: `{"detail": "could not evaluate image: <path>"}` / `{"detail": "could not evaluate image"}` |
 | 500 | `delete_hash`/`delete_bucket` on a nonexistent id (DB raises `ValueError`), or `eval_image` on a missing/unreadable file (PIL raises) |
-| 503 | Hydrus proxy endpoints with `API_KEY`/`TAG_SERVICE_KEY` unconfigured |
+| 503 | Hydrus proxy endpoints with `API_KEY`/`TAG_SERVICE_KEY` unconfigured; `get_bucket_membership` on a transient SQLite error |
 
 Hydrus proxy errors (thumbnail/file/file_path/resolve_hash) are forwarded with Hydrus's own status code and a `"hydrus: "`-prefixed detail.
 
@@ -387,11 +389,11 @@ Probe the hydrus connection for the web UI status dot (probes `search_files`, wh
 ```
 
 ### `GET /heartbeat`
-All topbar status probes in one call — what the web UI polls (every 10s idle, every 250ms while a search is running). `model` is the `/model_status` payload, `hydrus` the `/hydrus_status` payload (probed at most every 10s, cached in between), `quant_status` the `/db_status` value.
+All topbar status probes in one call — what the web UI polls every 10s (with an immediate re-sync after each search). `model` is the `/model_status` payload, `hydrus` the `/hydrus_status` payload (probed at most every 10s, cached in between), and `quant_status`/`last_search` the `/db_status` payload.
 
 **Response**
 ```json
-{"model": {"model": "ViT-B-16-SigLIP2", "loaded": true}, "hydrus": {"status": "ok", "detail": "connected"}, "quant_status": "ready"}
+{"model": {"model": "ViT-B-16-SigLIP2", "loaded": true}, "hydrus": {"status": "ok", "detail": "connected"}, "quant_status": "ready", "last_search": "bucket_3"}
 ```
 
 ### `POST /ingest_enqueue`

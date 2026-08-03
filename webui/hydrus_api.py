@@ -63,6 +63,7 @@ def build_router(db, model, config):
 			"model": {"model": model.model_name, "loaded": model.model is not None},
 			"hydrus": _hydrus_status_cached(),
 			"quant_status": db.quant_status,
+			"last_search": db.last_search,
 		}
 
 	@router.get("/thumbnail")

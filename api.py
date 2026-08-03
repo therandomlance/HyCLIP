@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -261,11 +262,11 @@ def list_bucket_members(bucket_id: int):
 
 @app.get("/get_bucket_membership")
 def get_bucket_membership(hash_id: int):
-	"""Inverse of list_bucket_members: which buckets contain this hash_id."""
+	"""Inverse of list_bucket_members: which buckets contain this hash_id ([] if un-ingested)."""
 	try:
 		return db.get_bucket_membership(hash_id)
-	except ValueError as e:
-		raise HTTPException(status_code=404, detail=str(e))
+	except sqlite3.Error:
+		raise HTTPException(status_code=503, detail="search database busy or unavailable")
 
 @app.post("/delete_bucket")
 def delete_bucket(bucket_id: int):
@@ -287,7 +288,7 @@ def num_embeddings():
 
 @app.get("/db_status")
 def db_status():
-	return {"quant_status": db.quant_status}
+	return {"quant_status": db.quant_status, "last_search": db.last_search}
 
 @app.post("/search")
 def search(req: SearchRequest):

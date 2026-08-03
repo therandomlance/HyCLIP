@@ -83,6 +83,7 @@ def main():
 	db.quant_prepare("embeddings")
 	assert db.quant_status == "ready", "quant status should be ready after quant_prepare"
 	results = db.search_global(make_embedding(0), EMB_DIM, num_results=3)
+	assert db.last_search == "global", "global search should record last_search"
 	assert len(results) == 3, f"expected 3 results, got {len(results)}"
 	dists = [d for _, d in results]
 	assert dists == sorted(dists), "results not ordered by distance"
@@ -104,6 +105,7 @@ def main():
 	db.remove_embedding(hash_ids[-1])
 	assert not db.exists_hash_id(hash_ids[-1]), "embedding should be removed"
 	assert db.get_num_embeddings() == len(images) - 1, "count after removal wrong"
+	assert db.get_bucket_membership(hash_ids[-1]) == [], "removed hash should have no bucket memberships"
 
 	db.remove_bucket(bucket_id)
 	assert not db.exists_bucket(bucket_id), "bucket should be removed"

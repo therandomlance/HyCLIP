@@ -35,7 +35,7 @@ const PAGES = [
 // Buttons marked data-requires="model,hydrus,db,input" are disabled (with a tooltip why)
 // until the model is loaded, the hydrus API is reachable with a valid key,
 // the search DB is not mid-quantize, and there is search input.
-const hyclip = { modelLoaded: false, hydrus: "unknown", quantStatus: "needs_quant", searching: false, hasInput: false };
+const hyclip = { modelLoaded: false, hydrus: "unknown", quantStatus: "needs_quant", lastSearch: null, currentScope: "global", hasInput: false };
 
 const HYDRUS_LABEL = {
 	ok: "Hydrus API connected",
@@ -81,12 +81,32 @@ function applyHydrusStatus(st) {
 	updateRequires();
 }
 
-function applyDbStatus(qs) {
-	hyclip.quantStatus = qs;
+// "ready" only counts for the scope that was last searched (one table is quantized at a time),
+// so a server "ready" for bucket 5 is "needs_quant" while viewing bucket 6.
+function effectiveDbStatus() {
+	if (hyclip.quantStatus === "unreachable") return "unreachable";
+	if (hyclip.quantStatus === "quantizing") return "quantizing";
+	if (hyclip.quantStatus === "ready" && hyclip.lastSearch === hyclip.currentScope) return "ready";
+	return "needs_quant";
+}
+
+function renderDb() {
+	const eff = effectiveDbStatus();
 	const dot = $("#db-dot");
-	dot.className = "dot " + (qs === "ready" ? "on" : qs === "needs_quant" ? "warn" : "off");
-	dot.title = $("#db-name").textContent = DB_LABEL[qs] ?? qs;
+	dot.className = "dot " + (eff === "ready" ? "on" : eff === "needs_quant" ? "warn" : "off");
+	dot.title = $("#db-name").textContent = DB_LABEL[eff] ?? eff;
 	updateRequires();
+}
+
+function applyDbStatus(qs, lastSearch) {
+	hyclip.quantStatus = qs;
+	if (lastSearch !== undefined) hyclip.lastSearch = lastSearch;
+	renderDb();
+}
+
+function setScope(scope) {
+	hyclip.currentScope = scope ? `bucket_${scope}` : "global";
+	renderDb();
 }
 
 async function refreshModelStatus() {
@@ -94,25 +114,26 @@ async function refreshModelStatus() {
 	catch { applyModelStatus(null); }
 }
 
-// All topbar dots in one call; polls fast only while a search is running
-// (here or elsewhere — a mid-quant DB means someone is searching)
-const HEARTBEAT_IDLE = 10000, HEARTBEAT_SEARCHING = 250;
-
-async function heartbeat() {
-	let ok = false;
+// All topbar dots in one call, every 10s; pokeHeartbeat() runs a tick immediately.
+let heartbeatTimer = null;
+function scheduleHeartbeat() {
+	clearTimeout(heartbeatTimer); // a poke + a pending timer can't double up
+	heartbeatTimer = setTimeout(heartbeatTick, 10000);
+}
+async function heartbeatTick() {
 	try {
 		const s = await api("/heartbeat");
 		applyModelStatus(s.model);
 		applyHydrusStatus(s.hydrus.status);
-		applyDbStatus(s.quant_status);
-		ok = true;
+		applyDbStatus(s.quant_status, s.last_search);
 	} catch {
 		applyModelStatus(null);
 		applyHydrusStatus("unknown");
 		applyDbStatus("unreachable");
 	}
-	setTimeout(heartbeat, ok && (hyclip.searching || hyclip.quantStatus === "quantizing") ? HEARTBEAT_SEARCHING : HEARTBEAT_IDLE);
+	scheduleHeartbeat();
 }
+function pokeHeartbeat() { heartbeatTick(); }
 
 function buildTopbar() {
 	const bar = $("#topbar");
@@ -124,9 +145,9 @@ function buildTopbar() {
 		<span id="hydrus-name">…</span>
 		<span id="model-dot" class="dot off"></span>
 		<span id="model-name">…</span>
+		<button id="model-toggle" class="btn small">Load model</button>
 		<span id="db-dot" class="dot warn"></span>
 		<span id="db-name">…</span>
-		<button id="model-toggle" class="btn small">Load model</button>
 		`;
 
 	const nav = document.createElement("nav");
@@ -155,7 +176,7 @@ function buildTopbar() {
 	};
 
 	updateRequires(); // start disabled until the first status check lands
-	heartbeat();
+	heartbeatTick();
 }
 
 buildTopbar();
