@@ -53,14 +53,14 @@ Key options:
 
 ## Ingesting from Hydrus
 
-Included helper script. Tag images in Hydrus with `hyclip:ingest`, then:
+`ingest.py` scans your Hydrus `client_files` folder and writes embeddings straight into `hyclip.db` — no server needed. It reads Hydrus's `client.master.db` read-only to map the sha256-hash filenames to their file ids. Run it from the repo root so it writes to the same `hyclip.db` the server uses:
 
 ```bash
-./ingest.sh                      # enqueue + process everything tagged
-./ingest.sh --tag mytag --max-to-evaluate 100 --batch-size 20
+.venv/bin/python ingest.py /path/to/hydrus/db /path/to/client_files
+.venv/bin/python ingest.py /path/to/hydrus/db /path/to/client_files --max-eval 100 --batch-size 40
 ```
 
-`ingest.sh` starts the server, enqueues tagged files via `ingest_enqueue`, then drains the queue one batch per request with a progress bar. The queue is persistent — interrupt it and re-run to resume. Files not yet ingested can also be added to a bucket via the web UI; they're queued automatically and can be added once processed.
+Already-ingested files are skipped, so an interrupted run can be resumed by re-running. The web UI's Ingest tab still provides the server-based alternative (tag files in Hydrus with `hyclip:ingest` and drain the persistent queue).
 
 ## API
 
@@ -72,7 +72,7 @@ See [API.md](API.md) for the full endpoint reference.
 - `db.py` — SQLite + vector search, buckets, ingest queue
 - `model.py` — open_clip model load/eval (image + text)
 - `config.py` — config load/save
-- `ingest.py` — Hydrus→HyCLIP ingest client (used by `ingest.sh`)
+- `ingest.py` — direct Hydrus→HyCLIP bulk ingest (reads `client.master.db` + `client_files` directly, no server)
 - `webui/` — static web UI and the Hydrus proxy router (`hydrus_api.py`)
 
 ## Tests

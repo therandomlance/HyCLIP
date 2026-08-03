@@ -6,16 +6,18 @@ CLIP-based semantic image search over a [Hydrus](hydrusnetwork.github.io/hydrus/
 
 ```bash
 # run the server (needs .venv)
-./run.sh                                   # binds to HYCLIP_API_URL or config; see env.sh
+./run.sh                                   # binds to HYCLIP_API_URL or config
 
 # tests are plain assert scripts, NOT pytest
 .venv/bin/python test/test_db.py           # fast, no model, generates fixtures
 .venv/bin/python test/test_api.py          # loads the real CLIP model (slow; needs HF download on first run)
 .venv/bin/python test/test_model.py        # loads the real CLIP model
 
-# ingest tagged images from hydrus (starts server in background, logs to server.log)
-./ingest.sh [--tag mytag --batch-size 20]
+# ingest directly into hyclip.db (no server; reads hydrus client.master.db read-only)
+.venv/bin/python ingest.py <hydrus_db_dir> <client_files_dir> [--max-eval N --batch-size N]
 ```
+
+Run `ingest.py` from the repo root so it writes to the same `hyclip.db` the server uses; already-ingested files are skipped, so re-running resumes an interrupted ingest. The server-based ingest flow (web UI Ingest tab, `ingest_enqueue`/`ingest_process_batch` endpoints, persistent queue) still exists in the API.
 
 There is no lint, typecheck, formatter, or CI config — don't invent commands for them.
 
@@ -33,6 +35,5 @@ There is no lint, typecheck, formatter, or CI config — don't invent commands f
 
 ## Notes
 
-- `ingest2.py` (untracked) bypasses the API: reads Hydrus's `client.master.db` directly (read-only) and writes straight to `HyCLIP_DB()` in cwd. Not part of the normal flow.
 - `webui/` is plain static JS served at `/webui/index.html`, no build step. `hydrus_api.py` is the Hydrus proxy router mounted into the app.
-- `ingest.py` is the Hydrus→HyCLIP CLI used by `ingest.sh`; the persistent ingest queue in SQLite lets interrupted runs resume.
+- `ingest.py` bypasses the API: reads Hydrus's `client.master.db` directly (read-only) and writes straight to `HyCLIP_DB()` in cwd. `run.sh` is self-contained (no `env.sh`).
