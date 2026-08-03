@@ -40,6 +40,8 @@ class HyCLIP_DB:
 		''')
 		self.commit()
 
+		self.needs_quant = True
+
 		self.clean_temp_buckets()
 		self.clean_queue()
 
@@ -195,7 +197,8 @@ class HyCLIP_DB:
 	# ========== Search ==========
 	# ===== Global Search =====
 	def search_global(self, embedding:list[float], model_dims, num_results=100) -> list[tuple[int, float]]:
-		self.quant_prepare("embeddings", model_dims)
+		if self.needs_quant:
+			self.quant_prepare("embeddings", model_dims)
 
 		Q = f'''
 			SELECT hash_id, v.distance
@@ -306,6 +309,7 @@ class HyCLIP_DB:
 		self.vector_init(table_name, model_dims)
 		self.vector_quantize(table_name)
 		self.quantize_preload(table_name)
+		self.needs_quant = False
 		self.commit()
 
 	def show_quantize_preload_size(self, table_name:str) -> int:
