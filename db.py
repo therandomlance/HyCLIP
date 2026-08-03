@@ -155,7 +155,7 @@ class HyCLIP_DB:
 		A = [(bucket_id, X) for X in hash_ids]
 		self.DB.executemany(Q, A)
 		
-		# Forces a quant on bucket search but not global
+		# Forces a quant on bucket search but not global (the slow one)
 		self.last_search = "global"
 		self.commit()
 
@@ -165,8 +165,13 @@ class HyCLIP_DB:
 		self._assert_bucket_id(bucket_id)
 		Q = "DELETE FROM bucket_members WHERE bucket_id = ? AND hash_id = ?"
 		A = [(bucket_id, X) for X in hash_ids]
-		
 		self.DB.executemany(Q, A)
+		
+		# Removing from an init bucket if it exists
+		if self.bucket_is_init(bucket_id):
+			Q = f"DELETE FROM temp_bucket_{bucket_id} WHERE bucket_id = ? AND hash_id = ?"
+			self.DB.execute(Q, A)
+			
 		self.quant_status = "needs_quant"
 		self.commit()
 
