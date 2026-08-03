@@ -15,7 +15,9 @@ class HyCLIP_Config:
 		"LOAD_MODEL_ON_STARTUP": False,
 		"THUMB_SIZE": 200,
 		"SEARCH_LIMIT": 100,
-		"BUCKET_CACHE_TIMEOUT": 300
+		"BUCKET_CACHE_TIMEOUT": 300,
+		"EVAL_WORKERS": 8,
+		"INGEST_BATCH_SIZE": 20
 	}
 
 	def __init__(self):

@@ -39,7 +39,7 @@ $("#start-btn").onclick = async () => {
 	$("#start-btn").hidden = true;
 	$("#stop-btn").hidden = false;
 
-	const batchSize = parseInt($("#batch-input").value) || 20;
+	const batchSize = parseInt($("#batch-input").value) || null; // null -> server's INGEST_BATCH_SIZE
 	const counts = { ingested: 0, already: 0, skipped: 0, errors: 0 };
 	const bar = $("#ingest-progress");
 	const line = $("#ingest-counts");
@@ -77,3 +77,4 @@ $("#start-btn").onclick = async () => {
 };
 
 refreshQueueCount();
+api("/get_config").then((cfg) => { $("#batch-input").value = cfg.INGEST_BATCH_SIZE ?? 20; }).catch(() => {});

@@ -127,7 +127,7 @@ Number of items currently queued.
 ```
 
 ### `POST /ingest_process_batch`
-Process one batch from the queue (default `batch_size` `20`). Files that fail evaluation (e.g. moved/deleted since enqueue) count as `errors` and are dropped.
+Process one batch from the queue (`batch_size` optional; defaults to the `INGEST_BATCH_SIZE` config value). Files that fail evaluation (e.g. moved/deleted since enqueue) count as `errors` and are dropped.
 
 **Request**
 ```json
@@ -284,7 +284,9 @@ Returns the full config (file values merged over defaults).
   "LOAD_MODEL_ON_STARTUP": false,
   "THUMB_SIZE": 200,
   "SEARCH_LIMIT": 100,
-  "BUCKET_CACHE_TIMEOUT": 300
+  "BUCKET_CACHE_TIMEOUT": 300,
+  "EVAL_WORKERS": 8,
+  "INGEST_BATCH_SIZE": 20
 }
 ```
 

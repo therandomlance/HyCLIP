@@ -50,7 +50,7 @@ class SearchRequest(BaseModel):
 	num_results: int = 100
 
 class ProcessBatchRequest(BaseModel):
-	batch_size: int = 20
+	batch_size: int | None = None  # falls back to config.INGEST_BATCH_SIZE
 
 class SearchBucketRequest(BaseModel):
 	embedding: list[float]
@@ -164,7 +164,7 @@ def ingest_image_batch(req: IngestBatchRequest):
 			continue
 		to_eval.append(i)
 
-	embeddings = model.eval_image_batch([req.items[i].path for i in to_eval])
+	embeddings = model.eval_image_batch([req.items[i].path for i in to_eval], config.EVAL_WORKERS)
 
 	inserts = []
 	for i, embedding in zip(to_eval, embeddings):
@@ -192,7 +192,7 @@ def ingest_process_batch(req: ProcessBatchRequest):
 	"""Process one batch from the persistent queue; the caller loops for progress."""
 	_require_model()
 
-	batch = db.get_next_queue(req.batch_size) or []
+	batch = db.get_next_queue(req.batch_size or config.INGEST_BATCH_SIZE) or []
 	if isinstance(batch, tuple):
 		batch = [batch]
 
@@ -210,7 +210,7 @@ def ingest_process_batch(req: ProcessBatchRequest):
 			continue
 		to_eval.append((hash_id, path))
 
-	for hash_id, embedding in zip([h for h, _ in to_eval], model.eval_image_batch([p for _, p in to_eval])):
+	for hash_id, embedding in zip([h for h, _ in to_eval], model.eval_image_batch([p for _, p in to_eval], config.EVAL_WORKERS)):
 		if embedding is None:
 			errors += 1
 			continue

@@ -53,7 +53,6 @@ def main():
 	parser.add_argument("db_location", type=str, help="Path to the hydrus db files")
 	parser.add_argument("folder", type=str, help="Folder to scan")
 	parser.add_argument("--max-eval", type=int, default=-1, help="max images to scan in one run")
-	parser.add_argument("--batch-size", type=int, default=40, help="Image evaluation batch size")
 
 	args = parser.parse_args()
 	
@@ -67,7 +66,6 @@ def main():
 
 	FOLDER = args.folder
 	MAX_EVAL = args.max_eval
-	BATCH_SIZE = args.batch_size
 
 	N = 0
 	finished = False
@@ -96,7 +94,7 @@ def main():
 			valid_hashes.append((F.stem, filepath))
 
 
-		hash_batches = split_into_batches(valid_hashes, BATCH_SIZE)
+		hash_batches = split_into_batches(valid_hashes, CFG.INGEST_BATCH_SIZE)
 
 		for batch in hash_batches:
 			if finished:
@@ -120,9 +118,8 @@ def main():
 					continue
 				to_eval.append((hash_id, filepath))
 			
-			WORKERS = 10
 			# Batch embedding
-			embeddings = MODEL.eval_image_batch([F for _, F in to_eval], WORKERS)
+			embeddings = MODEL.eval_image_batch([F for _, F in to_eval], CFG.EVAL_WORKERS)
 			
 			# Removing failed embeddings and inserting into db
 			for (hash_id, _), embedding in zip(to_eval, embeddings):
