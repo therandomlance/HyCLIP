@@ -34,11 +34,11 @@ function addPrompt(data = {}) {
 	const chk = document.createElement("input");
 	chk.type = "checkbox"; chk.checked = row.enabled; chk.className = "enable-check";
 	chk.title = "Enable / disable";
-	chk.onchange = () => { row.enabled = chk.checked; el.classList.toggle("disabled", !chk.checked); };
+	chk.onchange = () => { row.enabled = chk.checked; el.classList.toggle("disabled", !chk.checked); refreshHasInput(); };
 
 	const text = document.createElement("input");
 	text.type = "text"; text.placeholder = "Search text…"; text.value = row.text;
-	text.oninput = () => { row.text = text.value; };
+	text.oninput = () => { row.text = text.value; refreshHasInput(); };
 	text.onkeydown = (e) => { if (e.key === "Enter") performSearch(); };
 
 	const weight = document.createElement("input");
@@ -61,7 +61,7 @@ function addPrompt(data = {}) {
 	rm.onclick = () => {
 		if (state.prompts.length <= 1) return;
 		state.prompts.splice(state.prompts.indexOf(row), 1);
-		el.remove(); refreshPromptRemoveButtons();
+		el.remove(); refreshPromptRemoveButtons(); refreshHasInput();
 	};
 
 	el.append(chk, text, weight, sign, rm);
@@ -105,7 +105,7 @@ function addRef(ref) {
 	const chk = document.createElement("input");
 	chk.type = "checkbox"; chk.checked = true; chk.className = "enable-check";
 	chk.title = "Enable / disable";
-	chk.onchange = () => { r.enabled = chk.checked; el.classList.toggle("disabled", !chk.checked); };
+	chk.onchange = () => { r.enabled = chk.checked; el.classList.toggle("disabled", !chk.checked); refreshHasInput(); };
 
 	const img = document.createElement("img");
 	img.src = ref.thumbURL; img.alt = "";
@@ -139,11 +139,13 @@ function addRef(ref) {
 		state.refs.splice(state.refs.indexOf(r), 1);
 		el.remove();
 		status(`${state.refs.length} reference image(s)`);
+		refreshHasInput();
 	};
 
 	el.append(chk, img, label, weight, sign, rm);
 	$("#ref-list").append(el);
 	status(`${state.refs.length} reference image(s)`);
+	refreshHasInput();
 }
 
 async function addRefFiles(files) {
@@ -182,6 +184,11 @@ async function addRefById(hashId) {
 }
 
 // ===== Search =====
+function refreshHasInput() {
+	hyclip.hasInput = state.prompts.some((p) => p.enabled && p.text.trim()) || state.refs.some((r) => r.enabled);
+	updateRequires();
+}
+
 async function resolvePromptVectors() {
 	for (const p of state.prompts) {
 		if (!p.enabled || !p.text.trim()) continue;
@@ -207,9 +214,8 @@ function combineVectors() {
 }
 
 async function performSearch() {
-	const hasInput =
-		state.prompts.some((p) => p.enabled && p.text.trim()) || state.refs.length > 0;
-	if (!hasInput) return;
+	refreshHasInput();
+	if (!hyclip.hasInput) return;
 
 	$("#search-btn").dataset.busy = "1";
 	hyclip.searching = true; // heartbeat polls fast while this is set
@@ -418,6 +424,7 @@ async function init() {
 		state.prompts = [];
 		addPrompt();
 		displayResults([]);
+		refreshHasInput();
 		status("Cleared");
 	};
 	$("#thumb-size").oninput = () => { applyThumb(); };

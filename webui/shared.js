@@ -32,10 +32,10 @@ const PAGES = [
 ];
 
 // ===== Readiness gating =====
-// Buttons marked data-requires="model,hydrus,db" are disabled (with a tooltip why)
+// Buttons marked data-requires="model,hydrus,db,input" are disabled (with a tooltip why)
 // until the model is loaded, the hydrus API is reachable with a valid key,
-// and the search DB is not mid-quantize.
-const hyclip = { modelLoaded: false, hydrus: "unknown", quantStatus: "needs_quant", searching: false };
+// the search DB is not mid-quantize, and there is search input.
+const hyclip = { modelLoaded: false, hydrus: "unknown", quantStatus: "needs_quant", searching: false, hasInput: false };
 
 const HYDRUS_LABEL = {
 	ok: "Hydrus API connected",
@@ -48,6 +48,7 @@ const DB_LABEL = {
 	ready: "Search ready",
 	needs_quant: "Needs quant",
 	quantizing: "Quantizing…",
+	unreachable: "Server unreachable",
 };
 
 function updateRequires() {
@@ -57,6 +58,7 @@ function updateRequires() {
 		if (el.dataset.requires.includes("model") && !hyclip.modelLoaded) why.push("model not loaded");
 		if (el.dataset.requires.includes("hydrus") && hyclip.hydrus !== "ok") why.push(HYDRUS_LABEL[hyclip.hydrus] ?? "Hydrus API not connected");
 		if (el.dataset.requires.includes("db") && hyclip.quantStatus === "quantizing") why.push("search database is quantizing");
+		if (el.dataset.requires.includes("input") && !hyclip.hasInput) why.push("no enabled prompts or reference images");
 		el.disabled = why.length > 0;
 		el.title = why.length ? `Unavailable: ${why.join("; ")}` : "";
 	}
@@ -82,7 +84,7 @@ function applyHydrusStatus(st) {
 function applyDbStatus(qs) {
 	hyclip.quantStatus = qs;
 	const dot = $("#db-dot");
-	dot.className = "dot " + (qs === "ready" ? "on" : qs === "quantizing" ? "off" : "warn");
+	dot.className = "dot " + (qs === "ready" ? "on" : qs === "needs_quant" ? "warn" : "off");
 	dot.title = $("#db-name").textContent = DB_LABEL[qs] ?? qs;
 	updateRequires();
 }
@@ -107,6 +109,7 @@ async function heartbeat() {
 	} catch {
 		applyModelStatus(null);
 		applyHydrusStatus("unknown");
+		applyDbStatus("unreachable");
 	}
 	setTimeout(heartbeat, ok && (hyclip.searching || hyclip.quantStatus === "quantizing") ? HEARTBEAT_SEARCHING : HEARTBEAT_IDLE);
 }
