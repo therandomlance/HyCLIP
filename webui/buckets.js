@@ -21,6 +21,32 @@ async function refreshBuckets() {
 			const members = await api(`/list_bucket_members?bucket_id=${id}`);
 			label.textContent = `${name} (${members.length})`;
 		} catch {}
+		const ren = document.createElement("button");
+		ren.className = "btn remove-btn"; ren.textContent = "✎"; ren.title = "Rename bucket";
+		ren.onclick = () => {
+			const input = document.createElement("input");
+			input.type = "text";
+			input.value = name;
+			label.replaceWith(input);
+			input.focus();
+			input.select();
+			let done = false;
+			const finish = async (save) => {
+				if (done) return;
+				done = true;
+				const newName = input.value.trim();
+				if (save && newName && newName !== name) {
+					try { await post("/rename_bucket", { bucket_id: id, bucket_name: newName }); }
+					catch (e) { status(`Error: ${e.message}`); }
+				}
+				refreshBuckets();
+			};
+			input.onkeydown = (e) => {
+				if (e.key === "Enter") finish(true);
+				else if (e.key === "Escape") finish(false);
+			};
+			input.onblur = () => finish(true);
+		};
 		const del = document.createElement("button");
 		del.className = "btn remove-btn"; del.textContent = "✕"; del.title = "Delete bucket";
 		del.onclick = async () => {
@@ -28,7 +54,7 @@ async function refreshBuckets() {
 			await api(`/delete_bucket?bucket_id=${id}`, { method: "POST" });
 			refreshBuckets();
 		};
-		row.append(label, del);
+		row.append(label, ren, del);
 		list.append(row);
 	}
 }

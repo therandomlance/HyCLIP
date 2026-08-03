@@ -154,6 +154,19 @@ Create a persistent group of images to search together.
 {"bucket_id": 1}
 ```
 
+### `POST /rename_bucket`
+Rename a bucket. Renaming a bucket that doesn't exist is a silent no-op.
+
+**Request**
+```json
+{"bucket_id": 1, "bucket_name": "mountains"}
+```
+
+**Response**
+```json
+{"bucket_id": 1, "bucket_name": "mountains"}
+```
+
 ### `POST /insert_into_bucket`
 Add already-ingested `hash_id`s to a bucket. Un-ingested `hash_id`s are skipped and returned in `unknown` (re-adding an existing member is an error).
 
@@ -183,6 +196,29 @@ List the `hash_id`s in a bucket.
 **Response**
 ```json
 [111, 222, 333]
+```
+
+### `GET /get_bucket_membership`
+Inverse of `list_bucket_members`: list the `bucket_id`s containing a `hash_id`. **404** if the `hash_id` is unknown.
+
+**Query params:** `hash_id`
+
+**Response**
+```json
+[1, 2]
+```
+
+### `POST /remove_from_bucket`
+Remove `hash_id`s from a bucket. Non-members are silently ignored. Like `insert_into_bucket`, removals don't reach an already-searched bucket's temp table until the server restarts.
+
+**Request**
+```json
+{"bucket_id": 1, "hash_ids": [111, 222]}
+```
+
+**Response**
+```json
+{"bucket_id": 1, "removed": 2}
 ```
 
 ### `POST /delete_bucket`

@@ -41,6 +41,10 @@ class IngestBatchRequest(BaseModel):
 class CreateBucketRequest(BaseModel):
 	bucket_name: str
 
+class RenameBucketRequest(BaseModel):
+	bucket_id: int
+	bucket_name: str
+
 class InsertBucketRequest(BaseModel):
 	bucket_id: int
 	hash_ids: list[int]
@@ -231,11 +235,21 @@ def create_bucket(req: CreateBucketRequest):
 	bucket_id = db.new_bucket(req.bucket_name)
 	return {"bucket_id": bucket_id}
 
+@app.post("/rename_bucket")
+def rename_bucket(req: RenameBucketRequest):
+	db.rename_bucket(req.bucket_id, req.bucket_name)
+	return {"bucket_id": req.bucket_id, "bucket_name": req.bucket_name}
+
 @app.post("/insert_into_bucket")
 def insert_into_bucket(req: InsertBucketRequest):
 	# TODO add options for non-inserted hash_ids: strict, loose, deferred
 	unknown = db.add_to_bucket(req.bucket_id, req.hash_ids)
 	return {"bucket_id": req.bucket_id, "inserted": len(req.hash_ids) - len(unknown), "unknown": unknown}
+
+@app.post("/remove_from_bucket")
+def remove_from_bucket(req: InsertBucketRequest):
+	db.remove_from_bucket(req.bucket_id, req.hash_ids)
+	return {"bucket_id": req.bucket_id, "removed": len(req.hash_ids)}
 
 @app.get("/list_buckets")
 def list_buckets():
@@ -244,6 +258,14 @@ def list_buckets():
 @app.get("/list_bucket_members")
 def list_bucket_members(bucket_id: int):
 	return db.get_bucket_members(bucket_id)
+
+@app.get("/get_bucket_membership")
+def get_bucket_membership(hash_id: int):
+	"""Inverse of list_bucket_members: which buckets contain this hash_id."""
+	try:
+		return db.get_bucket_membership(hash_id)
+	except ValueError as e:
+		raise HTTPException(status_code=404, detail=str(e))
 
 @app.post("/delete_bucket")
 def delete_bucket(bucket_id: int):

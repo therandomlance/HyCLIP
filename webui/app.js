@@ -314,6 +314,20 @@ function refreshSelectionUI() {
 	const n = state.selected.size;
 	$("#selection-bar").hidden = n === 0;
 	$("#selection-count").textContent = `${n} selected`;
+	refreshRemoveSelect();
+}
+
+// ponytail: one membership request per selected image; fine for typical (small) selections
+async function refreshRemoveSelect() {
+	const sel = $("#bucket-remove-select");
+	sel.replaceChildren(new Option("Remove from bucket…", ""));
+	if (!state.selected.size) return;
+	try {
+		const lists = await Promise.all([...state.selected].map((id) => api(`/get_bucket_membership?hash_id=${id}`)));
+		const common = lists.reduce((a, b) => a.filter((x) => b.includes(x)));
+		const buckets = await api("/list_buckets");
+		for (const [id, name] of buckets) if (common.includes(id)) sel.append(new Option(name, id));
+	} catch {}
 }
 
 // ===== Context menu =====
@@ -371,6 +385,7 @@ async function refreshBuckets() {
 	act.replaceChildren(new Option("Add to bucket…", ""));
 	for (const [id, name] of buckets) act.append(new Option(name, id));
 
+	refreshRemoveSelect(); // bucket names may have changed
 	updateScopeCount();
 }
 
@@ -444,6 +459,18 @@ async function init() {
 		try {
 			const r = await post("/insert_into_bucket", { bucket_id: Number(bucketId), hash_ids: [...state.selected] });
 			status(`Added ${r.inserted} image(s) to bucket (visible in its searches after server restart if it was searched before)`);
+			clearSelection();
+		} catch (err) { status(`Error: ${err.message}`); }
+	};
+	$("#bucket-remove-select").onchange = async (e) => {
+		const bucketId = e.target.value;
+		const name = e.target.selectedOptions[0]?.textContent ?? `bucket ${bucketId}`;
+		e.target.value = "";
+		if (!bucketId || !state.selected.size) return;
+		if (!confirm(`Remove ${state.selected.size} selected image(s) from "${name}"?`)) return;
+		try {
+			const r = await post("/remove_from_bucket", { bucket_id: Number(bucketId), hash_ids: [...state.selected] });
+			status(`Removed ${r.removed} image(s) from "${name}"`);
 			clearSelection();
 		} catch (err) { status(`Error: ${err.message}`); }
 	};
