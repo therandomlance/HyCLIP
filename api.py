@@ -148,26 +148,34 @@ def ingest_image(req: IngestRequest):
 def ingest_image_batch(req: IngestBatchRequest):
 	_require_model()
 
-	results = []
-	embeddings = []
+	results = [None] * len(req.items)
+	to_eval = []
 
-	for item in req.items:
-		embedding = _ingest_image(item.hash_id, item.path)
-
-		if embedding is SKIPPED:
-			results.append({"hash_id": item.hash_id, "status": "skipped"})
+	for i, item in enumerate(req.items):
+		if not os.path.exists(item.path):
+			raise HTTPException(status_code=404, detail=f"file not found: {item.path}")
+		if db.exists_hash_id(item.hash_id):
+			results[i] = {"hash_id": item.hash_id, "status": "already_ingested"}
 			continue
+		if os.path.splitext(item.path)[1].lower() not in IMAGE_EXTS:
+			print(f"skipping unsupported filetype: {item.path}")
+			results[i] = {"hash_id": item.hash_id, "status": "skipped"}
+			continue
+		to_eval.append(i)
+
+	embeddings = model.eval_image_batch([req.items[i].path for i in to_eval])
+
+	inserts = []
+	for i, embedding in zip(to_eval, embeddings):
 		if embedding is None:
-			results.append({"hash_id": item.hash_id, "status": "already_ingested"})
-			continue
+			raise HTTPException(status_code=422, detail=f"could not evaluate image: {req.items[i].path}")
+		inserts.append((req.items[i].hash_id, embedding))
+		results[i] = {"hash_id": req.items[i].hash_id, "status": "ingested"}
 
-		embeddings.append((item.hash_id, embedding))
-		results.append({"hash_id": item.hash_id, "status": "ingested"})
-
-	for hash_id, embedding in embeddings:
+	for hash_id, embedding in inserts:
 		db.insert_embedding(hash_id, embedding)
 	db.commit()
-	db.dequeue_hashes([hash_id for hash_id, _ in embeddings])
+	db.dequeue_hashes([hash_id for hash_id, _ in inserts])
 
 	return results
 
@@ -187,19 +195,26 @@ def ingest_process_batch(req: ProcessBatchRequest):
 		batch = [batch]
 
 	ingested = already = skipped = errors = 0
+	to_eval = []
 	for hash_id, path in batch:
-		try:
-			embedding = _ingest_image(hash_id, path)
-		except HTTPException:
-			errors += 1  # e.g. file moved/deleted since enqueue
+		if not os.path.exists(path):
+			errors += 1
 			continue
-		if embedding is SKIPPED:
-			skipped += 1
-		elif embedding is None:
+		if db.exists_hash_id(hash_id):
 			already += 1
-		else:
-			db.insert_embedding(hash_id, embedding)
-			ingested += 1
+			continue
+		if os.path.splitext(path)[1].lower() not in IMAGE_EXTS:
+			skipped += 1
+			continue
+		to_eval.append((hash_id, path))
+
+	for hash_id, embedding in zip([h for h, _ in to_eval], model.eval_image_batch([p for _, p in to_eval])):
+		if embedding is None:
+			errors += 1
+			continue
+		db.insert_embedding(hash_id, embedding)
+		ingested += 1
+
 	db.commit()
 	db.dequeue_hashes([fid for fid, _ in batch])
 

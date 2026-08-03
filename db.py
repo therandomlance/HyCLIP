@@ -130,6 +130,9 @@ class HyCLIP_DB:
 	def exists_hash_id(self, hash_id:int) -> bool:
 		return self._exists("embeddings", ("hash_id", hash_id))
 
+	def get_all_hash_ids(self):
+		return self.qe("SELECT hash_id FROM embeddings")
+
 	# ===== Buckets =====
 	# Buckets are a persistent group of images that can be searched on together
 	def new_bucket(self, bucket_name:str) -> int:

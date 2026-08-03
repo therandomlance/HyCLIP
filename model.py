@@ -3,6 +3,7 @@ import torch
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
+import concurrent.futures
 from huggingface_hub import snapshot_download
 
 class HyCLIP_Model():
@@ -61,13 +62,37 @@ class HyCLIP_Model():
 			# Unreadable/unsupported/huge image (e.g. PIL DecompressionBombError) — caller treats None as a skip
 			print(f"could not evaluate image {image_path}: {e}")
 			return None
-		embedding = self.model.encode_image(image)
-		embedding = torch.nn.functional.normalize(embedding, dim=-1)
+		with torch.inference_mode():
+			embedding = self.model.encode_image(image)
+			embedding = torch.nn.functional.normalize(embedding, dim=-1)
 
 		return embedding.tolist()[0]
 
-	def eval_image_batch(self, image_paths:list[str]) -> list[list[float]] | None:
-		return
+	def _preprocess_one(self, path:str) -> torch.Tensor | None:
+		try:
+			return self.preprocess(Image.open(path))
+		except Exception as e:
+			print(f"could not evaluate image {path}: {e}")
+			return None
+
+	def eval_image_batch(self, image_paths:list[str], num_workers:int=4) -> list[list[float] | None]:
+		with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as ex:
+			results = list(ex.map(self._preprocess_one, image_paths))
+		tensors = [t for t in results if t is not None]
+		valid = [i for i, t in enumerate(results) if t is not None]
+		if not tensors:
+			return [None] * len(image_paths)
+
+		batch = torch.stack(tensors).to(self.device)
+		with torch.inference_mode():
+			embeddings = self.model.encode_image(batch)
+			embeddings = torch.nn.functional.normalize(embeddings, dim=-1)
+		result = embeddings.tolist()
+
+		out: list[list[float] | None] = [None] * len(image_paths)
+		for idx, emb in zip(valid, result):
+			out[idx] = emb
+		return out
 
 	def tokenize_text(self, text:str) -> list[float]:
 		tokenized_text = self.tokenizer(text).to(self.device)
