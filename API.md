@@ -328,6 +328,14 @@ The web UI is served at `/webui/index.html` (`/` remains the health check). Thes
 ### `GET /file_path?hash_id=` → `{"path": "<server path>"}`
 ### `GET /resolve_hash?hash=` → `{"hash_id": <file_id>, "ingested": <bool>}` — resolve a sha256 hash to a `hash_id`; **404** if unknown to hydrus
 
+### `GET /hydrus_status`
+Probe the hydrus connection for the web UI status dot (probes `search_files`, which needs the same permission the thumbnail/file proxies do).
+
+**Response** — `status` is `ok`, `denied` (key missing/rejected/insufficient permissions), or `unreachable` (API URL not responding):
+```json
+{"status": "ok", "detail": "connected"}
+```
+
 ### `POST /ingest_enqueue`
 Find hydrus files tagged `tag` (default `hyclip:ingest`), enqueue them for ingestion, and remove the tag from those successfully enqueued. Requires `TAG_SERVICE_KEY` (else **503**). Optional `max_evaluate` caps how many are enqueued.
 

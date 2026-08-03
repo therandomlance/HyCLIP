@@ -49,7 +49,8 @@ $("#add-hashes").onclick = async () => {
 	const hashes = $("#hash-input").value.split("\n").map((h) => h.trim()).filter(Boolean);
 	if (!hashes.length) return;
 
-	$("#add-hashes").disabled = true;
+	$("#add-hashes").dataset.busy = "1";
+	updateRequires();
 	const bar = $("#add-progress");
 	const counts = $("#add-counts");
 	const step = $("#add-step");
@@ -109,7 +110,8 @@ $("#add-hashes").onclick = async () => {
 		refreshBuckets();
 	} catch (e) { status(`Error: ${e.message}`); }
 	step.textContent = "";
-	$("#add-hashes").disabled = false;
+	delete $("#add-hashes").dataset.busy;
+	updateRequires();
 };
 
 refreshBuckets().catch((e) => status(`Buckets: ${e.message}`));

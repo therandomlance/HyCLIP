@@ -31,17 +31,54 @@ const PAGES = [
 	["config.html", "Config"],
 ];
 
+// ===== Readiness gating =====
+// Buttons marked data-requires="model,hydrus" are disabled (with a tooltip why)
+// until the model is loaded and the hydrus API is reachable with a valid key.
+const hyclip = { modelLoaded: false, hydrus: "unknown" };
+
+const HYDRUS_LABEL = {
+	ok: "Hydrus API connected",
+	denied: "Hydrus API key invalid or lacks permissions",
+	unreachable: "Hydrus API unreachable",
+	unknown: "Hydrus API status unknown",
+};
+
+function updateRequires() {
+	for (const el of document.querySelectorAll("[data-requires]")) {
+		if (el.dataset.busy) continue;
+		const why = [];
+		if (el.dataset.requires.includes("model") && !hyclip.modelLoaded) why.push("model not loaded");
+		if (el.dataset.requires.includes("hydrus") && hyclip.hydrus !== "ok") why.push(HYDRUS_LABEL[hyclip.hydrus] ?? "Hydrus API not connected");
+		el.disabled = why.length > 0;
+		el.title = why.length ? `Unavailable: ${why.join("; ")}` : "";
+	}
+}
+
 async function refreshModelStatus() {
 	try {
 		const s = await api("/model_status");
+		hyclip.modelLoaded = s.loaded;
 		$("#model-dot").className = "dot " + (s.loaded ? "on" : "off");
 		$("#model-name").textContent = `${s.model} — ${s.loaded ? "loaded" : "not loaded"}`;
 		$("#model-toggle").textContent = s.loaded ? "Unload model" : "Load model";
-		if (s.loaded) $("#model-toggle").classList.remove("attention");
 	} catch {
+		hyclip.modelLoaded = false;
 		$("#model-dot").className = "dot off";
 		$("#model-name").textContent = "server unreachable";
 	}
+	updateRequires();
+}
+
+async function refreshHydrusStatus() {
+	let st = "unknown";
+	try {
+		st = (await api("/hydrus_status")).status;
+	} catch { /* server unreachable */ }
+	hyclip.hydrus = st;
+	const dot = $("#hydrus-dot");
+	dot.className = "dot " + (st === "ok" ? "on" : st === "denied" ? "warn" : "off");
+	dot.title = $("#hydrus-name").textContent = HYDRUS_LABEL[st] ?? st;
+	updateRequires();
 }
 
 function buildTopbar() {
@@ -51,7 +88,9 @@ function buildTopbar() {
 	group.className = "tb-group";
 	group.innerHTML = `<span id="model-dot" class="dot off"></span>
 		<span id="model-name">…</span>
-		<button id="model-toggle" class="btn small">Load model</button>`;
+		<button id="model-toggle" class="btn small">Load model</button>
+		<span id="hydrus-dot" class="dot off"></span>
+		<span id="hydrus-name">…</span>`;
 
 	const nav = document.createElement("nav");
 	nav.className = "tb-group tb-tabs";
@@ -78,8 +117,10 @@ function buildTopbar() {
 		status("Ready");
 	};
 
+	updateRequires(); // start disabled until the first status check lands
 	refreshModelStatus();
-	setInterval(refreshModelStatus, 10000);
+	refreshHydrusStatus();
+	setInterval(() => { refreshModelStatus(); refreshHydrusStatus(); }, 10000);
 }
 
 buildTopbar();

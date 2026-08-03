@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HyCLIP — Buckets</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -29,7 +30,7 @@
 		</div>
 		<textarea id="hash-input" rows="10" placeholder="One hydrus sha256 hash per line"></textarea>
 		<div class="row">
-			<button id="add-hashes" class="btn primary">Add to bucket</button>
+			<button id="add-hashes" class="btn primary" data-requires="model,hydrus">Add to bucket</button>
 		</div>
 		<progress id="add-progress" value="0" max="1" hidden></progress>
 		<div id="add-step" class="hint"></div>

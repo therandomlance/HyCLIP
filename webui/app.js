@@ -211,7 +211,8 @@ async function performSearch() {
 		state.prompts.some((p) => p.enabled && p.text.trim()) || state.refs.length > 0;
 	if (!hasInput) return;
 
-	$("#search-btn").disabled = true;
+	$("#search-btn").dataset.busy = "1";
+	updateRequires();
 	status("Searching…");
 	try {
 		await resolvePromptVectors();
@@ -228,12 +229,12 @@ async function performSearch() {
 	} catch (e) {
 		if (e.status === 409) {
 			status("Model not loaded — click “Load model” in the top bar first");
-			$("#model-toggle").classList.add("attention");
 		} else {
 			status(`Search error: ${e.message}`);
 		}
 	} finally {
-		$("#search-btn").disabled = false;
+		delete $("#search-btn").dataset.busy;
+		updateRequires();
 	}
 }
 

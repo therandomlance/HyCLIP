@@ -18,13 +18,15 @@ async function refreshQueueCount() {
 $("#enqueue-btn").onclick = async () => {
 	const tag = $("#tag-input").value.trim() || "hyclip:ingest";
 	const max = parseInt($("#max-input").value) || null;
-	$("#enqueue-btn").disabled = true;
+	$("#enqueue-btn").dataset.busy = "1";
+	updateRequires();
 	status(`Searching hydrus for "${tag}"…`);
 	try {
 		const r = await post("/ingest_enqueue", { tag, max_evaluate: max });
 		status(`Enqueued ${r.enqueued} of ${r.found} tagged image(s) (${r.skipped} skipped, tag removed)`);
 	} catch (e) { status(`Error: ${e.message}`); }
-	$("#enqueue-btn").disabled = false;
+	delete $("#enqueue-btn").dataset.busy;
+	updateRequires();
 	refreshQueueCount();
 };
 

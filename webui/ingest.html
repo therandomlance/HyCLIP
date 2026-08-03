@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HyCLIP — Ingest</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -23,7 +24,7 @@
 			<input type="number" id="max-input" min="1" placeholder="all">
 		</div>
 		<div class="row">
-			<button id="enqueue-btn" class="btn">Enqueue new images</button>
+			<button id="enqueue-btn" class="btn" data-requires="hydrus">Enqueue new images</button>
 		</div>
 	</section>
 
@@ -34,7 +35,7 @@
 			<input type="number" id="batch-input" min="1" max="200" value="20">
 		</div>
 		<div class="row">
-			<button id="start-btn" class="btn primary">Start evaluation</button>
+				<button id="start-btn" class="btn primary" data-requires="model,hydrus">Start evaluation</button>
 			<button id="stop-btn" class="btn" hidden>Stop</button>
 		</div>
 		<progress id="ingest-progress" value="0" max="1"></progress>

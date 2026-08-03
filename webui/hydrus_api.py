@@ -31,6 +31,21 @@ def build_router(db, model, config):
 	def _hydrus_file(r, fallback_type: str):
 		return Response(content=r.content, media_type=r.headers.get("Content-Type", fallback_type))
 
+	@router.get("/hydrus_status")
+	def hydrus_status():
+		"""Probe the hydrus API for the topbar dot. search_files needs the same permission the UI's thumbnails do."""
+		if not config.API_KEY:
+			return {"status": "denied", "detail": "API_KEY not configured"}
+		try:
+			_hydrus().search_files(tags=["hyclip:status-probe"], return_file_ids=True)
+		except hydrus_api.InsufficientAccess:
+			return {"status": "denied", "detail": "API key rejected or lacks permissions"}
+		except hydrus_api.ConnectionError:
+			return {"status": "unreachable", "detail": f"cannot reach {config.API_URL}"}
+		except hydrus_api.APIError as e:  # reachable + authenticated, but something else failed
+			return {"status": "denied", "detail": f"hydrus error {e.response.status_code}"}
+		return {"status": "ok", "detail": "connected"}
+
 	@router.get("/thumbnail")
 	def thumbnail(hash_id: int):
 		try:

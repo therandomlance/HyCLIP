@@ -45,17 +45,9 @@ button, input, select { font: inherit; color: inherit; }
 	background: var(--danger); display: inline-block;
 }
 .dot.on { background: var(--ok); }
-#model-name { color: var(--text-dim); }
+.dot.warn { background: #e0a800; }
+#model-name, #hydrus-name { color: var(--text-dim); }
 #scope-count { color: var(--text-dim); font-size: 12px; }
-
-@keyframes pulse-border {
-	0%, 100% { box-shadow: 0 0 0 0 rgba(79, 140, 255, .7); }
-	50% { box-shadow: 0 0 0 6px rgba(79, 140, 255, 0); }
-}
-.btn.attention {
-	border-color: var(--accent);
-	animation: pulse-border 1.2s ease-out infinite;
-}
 
 /* ===== Tabs ===== */
 .tb-tabs {
@@ -172,16 +164,16 @@ details.panel > *:not(summary) { margin: 0 8px 8px; }
 	padding: 6px 12px;
 	cursor: pointer;
 }
-.btn:hover { border-color: var(--accent); }
+.btn:not(:disabled):hover { border-color: var(--accent); }
 .btn.primary {
 	background: var(--accent-dim);
 	border-color: var(--accent);
 	font-weight: bold;
 	padding: 10px;
 }
-.btn.primary:hover { background: var(--accent); color: #fff; }
+.btn.primary:not(:disabled):hover { background: var(--accent); color: #fff; }
 .btn.small { padding: 3px 8px; font-size: 12px; }
-.btn:disabled { opacity: .45; cursor: default; pointer-events: none; }
+.btn:disabled { opacity: .45; cursor: default; }
 
 input[type="text"], input[type="number"], select {
 	background: var(--bg);
