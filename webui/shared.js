@@ -32,9 +32,10 @@ const PAGES = [
 ];
 
 // ===== Readiness gating =====
-// Buttons marked data-requires="model,hydrus" are disabled (with a tooltip why)
-// until the model is loaded and the hydrus API is reachable with a valid key.
-const hyclip = { modelLoaded: false, hydrus: "unknown" };
+// Buttons marked data-requires="model,hydrus,db" are disabled (with a tooltip why)
+// until the model is loaded, the hydrus API is reachable with a valid key,
+// and the search DB is not mid-quantize.
+const hyclip = { modelLoaded: false, hydrus: "unknown", quantStatus: "needs_quant", searching: false };
 
 const HYDRUS_LABEL = {
 	ok: "Hydrus API connected",
@@ -43,42 +44,71 @@ const HYDRUS_LABEL = {
 	unknown: "Hydrus API status unknown",
 };
 
+const DB_LABEL = {
+	ready: "Search ready",
+	needs_quant: "Needs quant",
+	quantizing: "Quantizing…",
+};
+
 function updateRequires() {
 	for (const el of document.querySelectorAll("[data-requires]")) {
 		if (el.dataset.busy) continue;
 		const why = [];
 		if (el.dataset.requires.includes("model") && !hyclip.modelLoaded) why.push("model not loaded");
 		if (el.dataset.requires.includes("hydrus") && hyclip.hydrus !== "ok") why.push(HYDRUS_LABEL[hyclip.hydrus] ?? "Hydrus API not connected");
+		if (el.dataset.requires.includes("db") && hyclip.quantStatus === "quantizing") why.push("search database is quantizing");
 		el.disabled = why.length > 0;
 		el.title = why.length ? `Unavailable: ${why.join("; ")}` : "";
 	}
 }
 
-async function refreshModelStatus() {
-	try {
-		const s = await api("/model_status");
-		hyclip.modelLoaded = s.loaded;
-		$("#model-dot").className = "dot " + (s.loaded ? "on" : "off");
-		$("#model-name").textContent = `${s.model} — ${s.loaded ? "loaded" : "not loaded"}`;
-		$("#model-toggle").textContent = s.loaded ? "Unload model" : "Load model";
-	} catch {
-		hyclip.modelLoaded = false;
-		$("#model-dot").className = "dot off";
-		$("#model-name").textContent = "server unreachable";
-	}
+// s is a model_status payload, or null when the server is unreachable
+function applyModelStatus(s) {
+	hyclip.modelLoaded = !!s && s.loaded;
+	$("#model-dot").className = "dot " + (hyclip.modelLoaded ? "on" : "off");
+	$("#model-name").textContent = s ? `${s.model} — ${s.loaded ? "loaded" : "not loaded"}` : "server unreachable";
+	$("#model-toggle").textContent = hyclip.modelLoaded ? "Unload model" : "Load model";
 	updateRequires();
 }
 
-async function refreshHydrusStatus() {
-	let st = "unknown";
-	try {
-		st = (await api("/hydrus_status")).status;
-	} catch { /* server unreachable */ }
+function applyHydrusStatus(st) {
 	hyclip.hydrus = st;
 	const dot = $("#hydrus-dot");
 	dot.className = "dot " + (st === "ok" ? "on" : st === "denied" ? "warn" : "off");
 	dot.title = $("#hydrus-name").textContent = HYDRUS_LABEL[st] ?? st;
 	updateRequires();
+}
+
+function applyDbStatus(qs) {
+	hyclip.quantStatus = qs;
+	const dot = $("#db-dot");
+	dot.className = "dot " + (qs === "ready" ? "on" : qs === "quantizing" ? "off" : "warn");
+	dot.title = $("#db-name").textContent = DB_LABEL[qs] ?? qs;
+	updateRequires();
+}
+
+async function refreshModelStatus() {
+	try { applyModelStatus(await api("/model_status")); }
+	catch { applyModelStatus(null); }
+}
+
+// All topbar dots in one call; polls fast only while a search is running
+// (here or elsewhere — a mid-quant DB means someone is searching)
+const HEARTBEAT_IDLE = 10000, HEARTBEAT_SEARCHING = 250;
+
+async function heartbeat() {
+	let ok = false;
+	try {
+		const s = await api("/heartbeat");
+		applyModelStatus(s.model);
+		applyHydrusStatus(s.hydrus.status);
+		applyDbStatus(s.quant_status);
+		ok = true;
+	} catch {
+		applyModelStatus(null);
+		applyHydrusStatus("unknown");
+	}
+	setTimeout(heartbeat, ok && (hyclip.searching || hyclip.quantStatus === "quantizing") ? HEARTBEAT_SEARCHING : HEARTBEAT_IDLE);
 }
 
 function buildTopbar() {
@@ -91,6 +121,8 @@ function buildTopbar() {
 		<span id="hydrus-name">…</span>
 		<span id="model-dot" class="dot off"></span>
 		<span id="model-name">…</span>
+		<span id="db-dot" class="dot warn"></span>
+		<span id="db-name">…</span>
 		<button id="model-toggle" class="btn small">Load model</button>
 		`;
 
@@ -120,9 +152,7 @@ function buildTopbar() {
 	};
 
 	updateRequires(); // start disabled until the first status check lands
-	refreshModelStatus();
-	refreshHydrusStatus();
-	setInterval(() => { refreshModelStatus(); refreshHydrusStatus(); }, 10000);
+	heartbeat();
 }
 
 buildTopbar();

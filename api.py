@@ -143,7 +143,7 @@ def ingest_image(req: IngestRequest):
 		return {"hash_id": req.hash_id, "status": "already_ingested"}
 
 	db.insert_embedding(req.hash_id, embedding)
-	db.needs_quant = True
+	db.quant_status = "needs_quant"
 	db.commit()
 	db.dequeue_hashes([req.hash_id])
 
@@ -179,7 +179,7 @@ def ingest_image_batch(req: IngestBatchRequest):
 
 	for hash_id, embedding in inserts:
 		db.insert_embedding(hash_id, embedding)
-	db.needs_quant = True
+	db.quant_status = "needs_quant"
 	db.commit()
 	db.dequeue_hashes([hash_id for hash_id, _ in inserts])
 
@@ -221,7 +221,7 @@ def ingest_process_batch(req: ProcessBatchRequest):
 		db.insert_embedding(hash_id, embedding)
 		ingested += 1
 
-	db.needs_quant = True
+	db.quant_status = "needs_quant"
 	db.commit()
 	db.dequeue_hashes([fid for fid, _ in batch])
 
@@ -284,6 +284,10 @@ def delete_hash(hash_id: int):
 @app.get("/num_embeddings")
 def num_embeddings():
 	return db.get_num_embeddings()
+
+@app.get("/db_status")
+def db_status():
+	return {"quant_status": db.quant_status}
 
 @app.post("/search")
 def search(req: SearchRequest):

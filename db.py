@@ -40,7 +40,7 @@ class HyCLIP_DB:
 		''')
 		self.commit()
 
-		self.needs_quant = True
+		self.quant_status = "needs_quant"
 		self.last_search = None
 
 		self.clean_temp_buckets()
@@ -155,7 +155,8 @@ class HyCLIP_DB:
 		A = [(bucket_id, X) for X in hash_ids]
 		self.DB.executemany(Q, A)
 		
-		self.needs_quant = True
+		# Forces a quant on bucket search but not global
+		self.last_search = "global"
 		self.commit()
 
 		return unknown_hashes
@@ -166,7 +167,7 @@ class HyCLIP_DB:
 		A = [(bucket_id, X) for X in hash_ids]
 		
 		self.DB.executemany(Q, A)
-		self.needs_quant = True
+		self.quant_status = "needs_quant"
 		self.commit()
 
 	def remove_bucket(self, bucket_id:int):
@@ -221,7 +222,7 @@ class HyCLIP_DB:
 	# ========== Search ==========
 	# ===== Global Search =====
 	def search_global(self, embedding:list[float], model_dims, num_results=100) -> list[tuple[int, float]]:
-		if self.needs_quant or self.last_search == "bucket":
+		if self.quant_status != "ready" or self.last_search == "bucket":
 			self.quant_prepare("embeddings", model_dims)
 
 		Q = f'''
@@ -277,7 +278,7 @@ class HyCLIP_DB:
 
 		table_name = f'temp_bucket_{bucket_id}'
 
-		if self.needs_quant or self.last_search == "global":
+		if self.quant_status != "ready" or self.last_search == "global":
 			self.quant_prepare(table_name, model_dims)
 
 		Q = f'''
@@ -334,14 +335,19 @@ class HyCLIP_DB:
 	# ===== Quant Prep =====
 	# TODO Check if sqlite-vector can have multiple tables quantized at the same time
 	# TODO Make sure these old methods still work with the new DB
-	# TODO find a way to check current quant status
 
+	# quant_status transitions: needs_quant -> quantizing -> ready (back to needs_quant on failure)
 	def quant_prepare(self, table_name:str, model_dims:int=768):
-		self.vector_init(table_name, model_dims)
-		self.vector_quantize(table_name)
-		self.quantize_preload(table_name)
-		self.needs_quant = False
-		self.commit()
+		self.quant_status = "quantizing"
+		try:
+			self.vector_init(table_name, model_dims)
+			self.vector_quantize(table_name)
+			self.quantize_preload(table_name)
+			self.commit()
+		except Exception:
+			self.quant_status = "needs_quant"
+			raise
+		self.quant_status = "ready"
 
 	def show_quantize_preload_size(self, table_name:str) -> int:
 		Q = f"SELECT vector_quantize_memory('{table_name}', 'embedding')"

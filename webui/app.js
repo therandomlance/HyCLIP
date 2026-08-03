@@ -212,6 +212,7 @@ async function performSearch() {
 	if (!hasInput) return;
 
 	$("#search-btn").dataset.busy = "1";
+	hyclip.searching = true; // heartbeat polls fast while this is set
 	updateRequires();
 	status("Searching…");
 	try {
@@ -233,6 +234,7 @@ async function performSearch() {
 			status(`Search error: ${e.message}`);
 		}
 	} finally {
+		hyclip.searching = false;
 		delete $("#search-btn").dataset.busy;
 		updateRequires();
 	}

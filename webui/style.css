@@ -46,7 +46,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 .dot.on { background: var(--ok); }
 .dot.warn { background: #e0a800; }
-#model-name, #hydrus-name { color: var(--text-dim); }
+#model-name, #hydrus-name, #db-name { color: var(--text-dim); }
 #scope-count { color: var(--text-dim); font-size: 12px; }
 
 /* ===== Tabs ===== */

@@ -66,6 +66,7 @@ def main():
 	assert db.exists_bucket(bucket_id)
 
 	db.add_to_bucket(bucket_id, hash_ids[:4])
+	assert db.quant_status == "needs_quant", "bucket change should mark db as needing quant"
 	assert db.get_bucket_size(bucket_id) == 4, "wrong bucket size"
 	assert db.get_bucket_name(bucket_id) == "test-bucket"
 
@@ -80,6 +81,7 @@ def main():
 
 	# ---- global search ----
 	db.quant_prepare("embeddings")
+	assert db.quant_status == "ready", "quant status should be ready after quant_prepare"
 	results = db.search_global(make_embedding(0), EMB_DIM, num_results=3)
 	assert len(results) == 3, f"expected 3 results, got {len(results)}"
 	dists = [d for _, d in results]

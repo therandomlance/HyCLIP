@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 
 import hydrus_api
 from hydrus_api import TagAction
@@ -45,6 +46,24 @@ def build_router(db, model, config):
 		except hydrus_api.APIError as e:  # reachable + authenticated, but something else failed
 			return {"status": "denied", "detail": f"hydrus error {e.response.status_code}"}
 		return {"status": "ok", "detail": "connected"}
+
+	_hydrus_status_cache = [0.0, None]
+
+	def _hydrus_status_cached():
+		# ponytail: heartbeat polls at 4Hz during searches; probe hydrus at most every 10s
+		if _hydrus_status_cache[1] is None or time.monotonic() - _hydrus_status_cache[0] > 10:
+			_hydrus_status_cache[0] = time.monotonic()
+			_hydrus_status_cache[1] = hydrus_status()
+		return _hydrus_status_cache[1]
+
+	@router.get("/heartbeat")
+	def heartbeat():
+		"""All topbar status dots in one call."""
+		return {
+			"model": {"model": model.model_name, "loaded": model.model is not None},
+			"hydrus": _hydrus_status_cached(),
+			"quant_status": db.quant_status,
+		}
 
 	@router.get("/thumbnail")
 	def thumbnail(hash_id: int):
