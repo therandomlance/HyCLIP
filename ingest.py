@@ -32,6 +32,19 @@ class HyDB():
 		out.update({_hash.lower():hash_id for hash_id, _hash in results})
 		return out
 
+class Timer():
+	def __init__(self):
+		self.start_time = time.perf_counter()
+		self.skipped_filetype = 0
+		self.skipped_exists = 0
+		self.ingested = 0
+		self.failed = 0
+
+	def print_prog(self):
+		image_rate = self.ingested / (time.perf_counter()-self.start_time)
+		progress = f"Ingested: {self.ingested} | Skipped (Filetype): {self.skipped_filetype} | Skipped (Exists): {self.skipped_exists} | {str(image_rate)[:5]} img/s "
+		sys.stdout.write(f"\r\x1b[K{progress}")
+		sys.stdout.flush()
 
 def main():
 	parser = argparse.ArgumentParser(
@@ -58,11 +71,7 @@ def main():
 
 	N = 0
 	finished = False
-	skipped_filetype = 0
-	skipped_exists = 0
-	ingested = 0
-	failed = 0
-	start_time = time.perf_counter()
+	T = Timer()
 
 	existing = set(DB.get_all_hash_ids())
 
@@ -80,7 +89,7 @@ def main():
 			F = Path(file)
 
 			if F.suffix not in [".jpg", ".jpeg", ".png", ".webp"]:
-				skipped_filetype += 1
+				T.skipped_filetype += 1
 				continue
 
 			filepath = os.path.join(subfolder_path, file)
@@ -104,7 +113,10 @@ def main():
 				if hash_id is None:
 					continue
 				if hash_id in existing:
-					skipped_exists += 1
+					T.skipped_exists += 1
+					# Print progress less often when loop is hot
+					if T.skipped_exists % 2000 == 0:
+						T.print_prog()
 					continue
 				to_eval.append((hash_id, filepath))
 			
@@ -115,22 +127,19 @@ def main():
 			# Removing failed embeddings and inserting into db
 			for (hash_id, _), embedding in zip(to_eval, embeddings):
 				if embedding is None:
-					failed += 1
+					T.failed += 1
 					continue
 
 				DB.insert_embedding(hash_id, embedding)
-				ingested += 1
+				T.ingested += 1
 
 				if MAX_EVAL != -1 and ingested >= MAX_EVAL:
 					finished = True 
 					break
 
-			
-			# Console output each time a batch is completed
-			image_rate = ingested / (time.perf_counter()-start_time)
-			progress = f"Ingested: {ingested} | Skipped (Filetype): {skipped_filetype} | Skipped (Exists): {skipped_exists} | {str(image_rate)[:5]} img/s "
-			sys.stdout.write(f"\r\x1b[K{progress}")
-			sys.stdout.flush()
+			# Print Progress each time a non-trivial batch is completed
+			if len(to_eval) > 0:
+				T.print_prog()
 
 			DB.commit()
 
