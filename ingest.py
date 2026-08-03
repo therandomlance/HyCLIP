@@ -90,6 +90,9 @@ def main():
 		hash_batches = split_into_batches(valid_hashes, BATCH_SIZE)
 
 		for batch in hash_batches:
+			if finished:
+				break 
+			
 			hashes, filepaths = zip(*batch)
 			hash_ids = HY.get_hash_id_batch(hashes)
 
@@ -117,6 +120,10 @@ def main():
 
 				DB.insert_embedding(hash_id, embedding)
 				ingested += 1
+
+				if MAX_EVAL != -1 and ingested >= MAX_EVAL:
+					finished = True 
+					break
 
 			
 			# Console output each time a batch is completed
