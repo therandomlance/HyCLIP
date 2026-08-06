@@ -5,3 +5,4 @@ open_clip_torch==3.3.0
 sqliteai-vector==1.0.0
 transformers==5.14.1
 uvloop==0.22.1
+uvicorn==0.52.0
