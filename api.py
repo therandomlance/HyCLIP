@@ -132,7 +132,7 @@ def ingest_image(req: IngestRequest):
 	except FileNotFoundError: 
 		raise HTTPException(status_code=404, detail=f"file not found: {path}")
 	except RuntimeError as E:
-		raise HTTPException(status_code=409, detail=E)
+		raise HTTPException(status_code=409, detail=E.response.text)
 	
 
 	embedding = _ingest_image(req.hash_id, req.path)
@@ -269,6 +269,13 @@ def delete_bucket(bucket_id: int):
 
 
 # ===== Embeddings =====
+@app.get("/get_embedding")
+def get_embedding(hash_id: int):
+	try:
+		return db.get_embedding(hash_id)
+	except ValueError as e:
+		raise HTTPException(status_code=404, detail=str(e))
+		
 @app.post("/delete_hash")
 def delete_hash(hash_id: int):
 	db.remove_embedding(hash_id)

@@ -47,21 +47,12 @@ def build_router(db, model, config):
 			return {"status": "denied", "detail": f"hydrus error {e.response.status_code}"}
 		return {"status": "ok", "detail": "connected"}
 
-	_hydrus_status_cache = [0.0, None]
-
-	def _hydrus_status_cached():
-		# ponytail: heartbeat polls at 4Hz during searches; probe hydrus at most every 10s
-		if _hydrus_status_cache[1] is None or time.monotonic() - _hydrus_status_cache[0] > 10:
-			_hydrus_status_cache[0] = time.monotonic()
-			_hydrus_status_cache[1] = hydrus_status()
-		return _hydrus_status_cache[1]
-
 	@router.get("/heartbeat")
 	def heartbeat():
 		"""All topbar status dots in one call."""
 		return {
 			"model": {"model": model.model_name, "loaded": model.model is not None},
-			"hydrus": _hydrus_status_cached(),
+			"hydrus": hydrus_status(),
 			"quant_status": db.quant_status,
 			"last_search": db.last_search,
 		}
@@ -87,17 +78,11 @@ def build_router(db, model, config):
 		except hydrus_api.APIError as e:
 			raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
 
-	@router.get("/get_embedding")
-	def get_embedding(hash_id: int):
-		try:
-			return db.get_embedding(hash_id)
-		except ValueError as e:
-			raise HTTPException(status_code=404, detail=str(e))
-
 	@router.get("/resolve_hash")
 	def resolve_hash(hash: str):
 		"""Resolve a hydrus sha256 hash to a file_id (the db's hash_id)."""
 		try:
+			# TODO find a way to get the hash in a faster way than this heavy API request
 			meta = _hydrus().get_file_metadata(hashes=[hash], only_return_identifiers=True).get("metadata", [])
 		except hydrus_api.APIError as e:
 			raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
@@ -129,6 +114,7 @@ def build_router(db, model, config):
 	@router.post("/ingest_enqueue")
 	def ingest_enqueue(req: IngestEnqueueRequest):
 		"""Find hydrus files tagged `tag`, load them into the ingest queue, and remove the tag."""
+		# TODO slim this down as much as I can
 		if not config.TAG_SERVICE_KEY:
 			raise HTTPException(status_code=503, detail="TAG_SERVICE_KEY not configured")
 		hydrus = _hydrus()
@@ -161,6 +147,7 @@ def build_router(db, model, config):
 	@router.post("/add_hashes_to_bucket")
 	def add_hashes_to_bucket(req: AddHashesToBucketRequest):
 		"""Resolve sha256 hashes via hydrus: add ingested ones to the bucket, return the rest for the client to ingest."""
+		# TODO I can probably improve this a lot
 		hashes = [h.strip() for h in req.hashes if h.strip()]
 		if not hashes:
 			return {"added": 0, "pending": [], "already_queued": 0, "unknown": []}
