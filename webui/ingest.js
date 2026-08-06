@@ -5,7 +5,7 @@ let stopRequested = false;
 
 async function refreshQueueCount() {
 	try {
-		const { queued } = await api("/ingest_status");
+		const { queued } = await api("/queue_status");
 		$("#queue-count").textContent = queued;
 		return queued;
 	} catch (e) {
@@ -58,7 +58,7 @@ $("#start-btn").onclick = async () => {
 		redraw(0, total);
 
 		while (total > 0 && !stopRequested) {
-			const r = await post("/ingest_process_batch", { batch_size: batchSize });
+			const r = await post("/work_queue", { batch_size: batchSize });
 			if (!r.processed) break;
 			counts.ingested += r.ingested;
 			counts.already += r.already_ingested;

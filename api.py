@@ -188,12 +188,12 @@ def ingest_image_batch(req: IngestBatchRequest):
 
 
 # ===== Ingest Queue =====
-@app.get("/ingest_status")
-def ingest_status():
+@app.get("/queue_status")
+def queue_status():
 	return {"queued": db.get_num_queue() or 0}
 
-@app.post("/ingest_process_batch")
-def ingest_process_batch(req: ProcessBatchRequest):
+@app.post("/work_queue")
+def work_queue(req: ProcessBatchRequest):
 	"""Process one batch from the persistent queue; the caller loops for progress."""
 	_require_model()
 

@@ -118,7 +118,7 @@ Ingest multiple images. Evaluates all pending images first, then inserts all emb
 
 A persistent queue of `(hash_id, path)` entries, typically fed by the Hydrus proxy (`ingest_enqueue`). The client drains it in batches; entries are removed only after processing.
 
-### `GET /ingest_status`
+### `GET /queue_status`
 Number of items currently queued.
 
 **Response**
@@ -126,7 +126,7 @@ Number of items currently queued.
 {"queued": 5}
 ```
 
-### `POST /ingest_process_batch`
+### `POST /work_queue`
 Process one batch from the queue (`batch_size` optional; defaults to the `INGEST_BATCH_SIZE` config value). Files that fail evaluation (e.g. moved/deleted since enqueue) count as `errors` and are dropped.
 
 **Request**
@@ -408,7 +408,7 @@ Find hydrus files tagged `tag` (default `hyclip:ingest`), enqueue them for inges
 ```json
 {"found": 120, "enqueued": 100, "skipped": 5}
 ```
-`skipped` counts tagged files with no local path (e.g. trashed/deleted). Drive the queue with `ingest_status`/`ingest_process_batch`.
+`skipped` counts tagged files with no local path (e.g. trashed/deleted). Drive the queue with `queue_status`/`work_queue`.
 
 ### `POST /add_hashes_to_bucket`
 Resolve sha256 hashes via hydrus: already-ingested files are added to the bucket immediately (and removed from the ingest queue if present); the rest are returned as `pending` for the client to ingest via `ingest_image_batch` and then add via `insert_into_bucket`. Requires `API_KEY`; **404** if the bucket doesn't exist.

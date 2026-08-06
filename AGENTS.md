@@ -17,7 +17,7 @@ CLIP-based semantic image search over a [Hydrus](hydrusnetwork.github.io/hydrus/
 .venv/bin/python ingest.py <hydrus_db_dir> <client_files_dir> [--max-eval N --batch-size N]
 ```
 
-Run `ingest.py` from the repo root so it writes to the same `hyclip.db` the server uses; already-ingested files are skipped, so re-running resumes an interrupted ingest. The server-based ingest flow (web UI Ingest tab, `ingest_enqueue`/`ingest_process_batch` endpoints, persistent queue) still exists in the API.
+Run `ingest.py` from the repo root so it writes to the same `hyclip.db` the server uses; already-ingested files are skipped, so re-running resumes an interrupted ingest. The server-based ingest flow (web UI Ingest tab, `ingest_enqueue`/`work_queue` endpoints, persistent queue) still exists in the API.
 
 There is no lint, typecheck, formatter, or CI config — don't invent commands for them.
 
