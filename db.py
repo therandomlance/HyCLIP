@@ -111,9 +111,11 @@ class HyCLIP_DB:
 		self.DB.execute(Q, A)
 	
 	def remove_embedding(self, hash_id:int):
-		# TODO remove from temp bucket tables without regenerating them
 		self._assert_hash_id(hash_id)
-		self._delete("bucket_members", ("hash_id", hash_id))
+
+		# Removes from all buckets it's part of
+		for bucket_id in self.get_bucket_membership(hash_id):
+			self.remove_from_bucket(bucket_id, hash_id)
 		self._delete("embeddings", ("hash_id", hash_id))
 		self.commit()
 
