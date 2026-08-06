@@ -22,6 +22,14 @@ class HyCLIP_Model():
 		self.preprocess = None
 		self.tokenizer = None
 
+	def _assert_filepath(self, filepath:str):
+		if not os.path.isfile(filepath):
+			raise FileNotFoundError(f"model.py: filepath not found: {filepath}")
+
+	def _assert_model_loaded():
+		if not self.model:
+			raise RuntimeError(f"Model not loaded! - {self.model_name}")
+	
 	# Returns the path to the model if it is already in the HF cache, else None
 	def cached_path(self) -> str | None:
 		repo = open_clip.pretrained.get_pretrained_cfg(self.model_name, self.PRETRAINED_TAG).get("hf_hub", "").rstrip("/")
@@ -54,6 +62,9 @@ class HyCLIP_Model():
 		self.tokenizer = None
 
 	def eval_image(self, image_path:str) -> list[float] | None:
+		self._assert_filepath(image_path)
+		self._assert_model_loaded()
+
 		# I have no idea how this works, I just stole it from teh example scripts
 		try:
 			image = Image.open(image_path)
@@ -72,10 +83,12 @@ class HyCLIP_Model():
 		try:
 			return self.preprocess(Image.open(path))
 		except Exception as e:
-			print(f"could not evaluate image {path}: {e}")
+			print(f"preprocess could not evaluate image {path}: {e}")
 			return None
 
 	def eval_image_batch(self, image_paths:list[str], num_workers:int=4) -> list[list[float] | None]:
+		self._assert_model_loaded()
+		
 		with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as ex:
 			results = list(ex.map(self._preprocess_one, image_paths))
 		tensors = [t for t in results if t is not None]
@@ -95,6 +108,8 @@ class HyCLIP_Model():
 		return out
 
 	def tokenize_text(self, text:str) -> list[float]:
+		self._assert_model_loaded()
+		
 		tokenized_text = self.tokenizer(text).to(self.device)
 		embedding = self.model.encode_text(tokenized_text)
 		embedding = torch.nn.functional.normalize(embedding, dim=-1)
