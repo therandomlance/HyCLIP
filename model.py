@@ -29,6 +29,10 @@ class HyCLIP_Model():
 	def _assert_model_loaded():
 		if not self.model:
 			raise RuntimeError(f"Model not loaded! - {self.model_name}")
+
+	def check_filetype(self, filepath):
+		IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+		return os.path.splitext(filepath)[1].lower() in IMAGE_EXTS
 	
 	# Returns the path to the model if it is already in the HF cache, else None
 	def cached_path(self) -> str | None:

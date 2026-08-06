@@ -86,7 +86,7 @@ def main():
 		for file in files:
 			F = Path(file)
 
-			if F.suffix not in [".jpg", ".jpeg", ".png", ".webp"]:
+			if not MODEL.check_filetype(F.suffix):
 				T.skipped_filetype += 1
 				continue
 

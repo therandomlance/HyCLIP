@@ -67,28 +67,11 @@ class UpdateConfigRequest(BaseModel):
 
 
 # ===== Helpers =====
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 SKIPPED = object()
 
 def _require_model():
 	if model.model is None:
 		raise HTTPException(status_code=409, detail="model not loaded")
-
-def _ingest_image(hash_id: int, path: str) -> list[float] | None | object:
-	"""Evaluate a path into an embedding; None if already ingested, SKIPPED if wrong filetype."""
-	if not os.path.exists(path):
-		raise HTTPException(status_code=404, detail=f"file not found: {path}")
-	if db.exists_hash_id(hash_id):
-		return None
-	if os.path.splitext(path)[1].lower() not in IMAGE_EXTS:
-		print(f"skipping unsupported filetype: {path}")
-		return SKIPPED
-
-	embedding = model.eval_image(path)
-	if embedding is None:
-		raise HTTPException(status_code=422, detail=f"could not evaluate image: {path}")
-
-	return embedding
 
 
 # ===== Server =====
@@ -136,19 +119,33 @@ def eval_text(req: TextRequest):
 def ingest_image(req: IngestRequest):
 	_require_model()
 
+	hash_id = req.hash_id
+	path = req.path
+	
+	if db.exists_hash_id(hash_id):
+		return {"hash_id": hash_id, "status": "already_ingested"}
+	if not model.check_filetype(req.hash_id):
+		return {"hash_id": hash_id, "status": "skipped"}
+	
+	try:
+		embedding = model.eval_image(path)
+	except FileNotFoundError: 
+		raise HTTPException(status_code=404, detail=f"file not found: {path}")
+	except RuntimeError as E:
+		raise HTTPException(status_code=409, detail=E)
+	
+
 	embedding = _ingest_image(req.hash_id, req.path)
 
-	if embedding is SKIPPED:
-		return {"hash_id": req.hash_id, "status": "skipped"}
 	if embedding is None:
-		return {"hash_id": req.hash_id, "status": "already_ingested"}
+		return {"hash_id": hash_id, "status": "failed"}
 
-	db.insert_embedding(req.hash_id, embedding)
+	db.insert_embedding(hash_id, embedding)
 	db.quant_status = "needs_quant"
 	db.commit()
-	db.dequeue_hashes([req.hash_id])
+	db.dequeue_hashes([hash_id])
 
-	return {"hash_id": req.hash_id, "status": "ingested"}
+	return {"hash_id": hash_id, "status": "ingested"}
 
 @app.post("/ingest_image_batch")
 def ingest_image_batch(req: IngestBatchRequest):
@@ -163,7 +160,7 @@ def ingest_image_batch(req: IngestBatchRequest):
 		if db.exists_hash_id(item.hash_id):
 			results[i] = {"hash_id": item.hash_id, "status": "already_ingested"}
 			continue
-		if os.path.splitext(item.path)[1].lower() not in IMAGE_EXTS:
+		if not model.check_filetype(item.path):
 			print(f"skipping unsupported filetype: {item.path}")
 			results[i] = {"hash_id": item.hash_id, "status": "skipped"}
 			continue
@@ -201,16 +198,16 @@ def work_queue(req: ProcessBatchRequest):
 	if isinstance(batch, tuple):
 		batch = [batch]
 
-	ingested = already = skipped = errors = 0
+	ingested = exists = skipped = errors = 0
 	to_eval = []
 	for hash_id, path in batch:
 		if not os.path.exists(path):
 			errors += 1
 			continue
 		if db.exists_hash_id(hash_id):
-			already += 1
+			exists += 1
 			continue
-		if os.path.splitext(path)[1].lower() not in IMAGE_EXTS:
+		if not model.check_filetype(path):
 			skipped += 1
 			continue
 		to_eval.append((hash_id, path))
@@ -226,7 +223,7 @@ def work_queue(req: ProcessBatchRequest):
 	db.commit()
 	db.dequeue_hashes([fid for fid, _ in batch])
 
-	return {"processed": len(batch), "ingested": ingested, "already_ingested": already,
+	return {"processed": len(batch), "ingested": ingested, "already_ingested": exists,
 		"skipped": skipped, "errors": errors, "remaining": db.get_num_queue() or 0}
 
 
@@ -262,11 +259,8 @@ def list_bucket_members(bucket_id: int):
 
 @app.get("/get_bucket_membership")
 def get_bucket_membership(hash_id: int):
-	"""Inverse of list_bucket_members: which buckets contain this hash_id ([] if un-ingested)."""
-	try:
-		return db.get_bucket_membership(hash_id)
-	except sqlite3.Error:
-		raise HTTPException(status_code=503, detail="search database busy or unavailable")
+	return db.get_bucket_membership(hash_id)
+
 
 @app.post("/delete_bucket")
 def delete_bucket(bucket_id: int):
