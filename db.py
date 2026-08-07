@@ -157,6 +157,9 @@ class HyCLIP_DB:
 		Q = "INSERT INTO bucket_members (bucket_id, hash_id) VALUES ( ?, ? )"
 		A = [(bucket_id, X) for X in hash_ids]
 		self.DB.executemany(Q, A)
+
+		if self.bucket_is_init(bucket_id):
+			self.init_bucket(bucket_id)
 		
 		# Forces a quant on bucket search but not global (the slow one)
 		self.last_search = "global"
