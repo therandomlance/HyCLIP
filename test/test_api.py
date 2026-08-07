@@ -10,12 +10,11 @@ from fastapi.testclient import TestClient
 import api
 from db import HyCLIP_DB
 from config import HyCLIP_Config
+from model import HyCLIP_Model
 
 TEST_DIR = Path(__file__).resolve().parent
 IMG_DIR = TEST_DIR / "test_images"
 DB_PATH = TEST_DIR / "test.db"
-
-EMB_DIM = api.model.dims  # follow the configured model, not a hardcoded dim
 
 
 def get_images(n: int) -> list[Path]:
@@ -25,7 +24,10 @@ def get_images(n: int) -> list[Path]:
 
 
 def main():
-	# Isolate from the real db/config so the test never touches them
+	# Isolate from the real db/config/model so the test never touches them.
+	# All three module singletons (db, config, model) are swapped so that both
+	# the api.py endpoints and the hydrus-router endpoints (which now read
+	# api.db/api.model/api.config at call time) see the test instances.
 	if DB_PATH.exists():
 		DB_PATH.unlink()
 	real_db = api.db
@@ -34,6 +36,15 @@ def main():
 	real_config = api.config
 	api.config = HyCLIP_Config()
 	api.config.config_path = Path(tempfile.mkdtemp(prefix="hyclip_test_config")) / "config.json"
+	# Force the hydrus proxy offline so the test never reaches a real hydrus,
+	# regardless of what the user's actual config.json contains.
+	for key in ("API_KEY", "TAG_SERVICE_KEY", "RATING_SERVICE_KEY"):
+		setattr(api.config, key, None)
+		api.config.cfg[key] = None
+
+	real_model = api.model
+	api.model = HyCLIP_Model(api.config.CLIP_MODEL)
+	EMB_DIM = api.model.dims  # follow the configured model, not a hardcoded dim
 
 	client = TestClient(api.app)
 
@@ -41,11 +52,39 @@ def main():
 	r = client.get("/")
 	assert r.status_code == 200 and r.json() == {"Hello": "World"}
 
-	# ---- model: unloaded -> 409 on eval, then load ----
+	# ---- 409: model not loaded (every model-dependent endpoint) ----
 	assert client.get("/model_status").json()["loaded"] is False
-	r = client.post("/eval_text", json={"text": "a cat"})
-	assert r.status_code == 409, "eval_text should 409 with no model loaded"
+	for url, payload in [
+		("/eval_text", {"text": "a cat"}),
+		("/eval_image", {"path": str(get_images(1)[0])}),
+		("/ingest_image", {"hash_id": 1, "path": str(get_images(1)[0])}),
+		("/ingest_image_batch", {"items": []}),
+		("/work_queue", {}),
+	]:
+		assert client.post(url, json=payload).status_code == 409, f"{url} should 409 with no model loaded"
+	# router endpoint: eval_image_upload with no known hash_id needs the model
+	assert client.post("/eval_image_upload").status_code == 409, "eval_image_upload should 409 with no model loaded"
 
+	# ---- hydrus proxy: no API_KEY / TAG_SERVICE_KEY configured -> 503/early-return ----
+	assert client.get("/hydrus_status").json()["status"] == "denied", "hydrus_status should be denied without API_KEY"
+	for url in ["/thumbnail", "/file", "/file_path"]:
+		assert client.get(url, params={"hash_id": 1}).status_code == 503, f"{url} should 503 without API_KEY"
+	assert client.get("/resolve_hash", params={"hash": "deadbeef"}).status_code == 503, "resolve_hash should 503 without API_KEY"
+	assert client.post("/ingest_enqueue", json={"tag": "hyclip:ingest"}).status_code == 503, "ingest_enqueue should 503 without TAG_SERVICE_KEY"
+
+	# add_hashes_to_bucket: empty hash list short-circuits before reaching hydrus
+	r = client.post("/add_hashes_to_bucket", json={"bucket_id": 1, "hashes": []})
+	assert r.status_code == 200 and r.json() == {"added": 0, "pending": [], "already_queued": 0, "unknown": []}
+	# non-empty hash list requires hydrus -> 503
+	assert client.post("/add_hashes_to_bucket", json={"bucket_id": 1, "hashes": ["deadbeef"]}).status_code == 503
+
+	# ---- heartbeat: aggregates model + hydrus + db status ----
+	hb = client.get("/heartbeat").json()
+	assert {"model", "hydrus", "quant_status", "last_search"} <= set(hb), "heartbeat missing keys"
+	assert hb["model"]["loaded"] is False
+	assert hb["hydrus"]["status"] == "denied"
+
+	# ---- model: load ----
 	r = client.post("/load_model")
 	assert r.status_code == 200 and r.json()["loaded"] is True
 	assert client.get("/model_status").json()["loaded"] is True
@@ -91,6 +130,19 @@ def main():
 	r = client.post("/ingest_image_batch", json={"items": [{"hash_id": 99, "path": str(images[0])}]})
 	assert r.json()[0]["status"] == "ingested"
 	assert api.db.get_num_queue() == 0, "ingested file should be dequeued"
+
+	# ---- ingest queue: queue_status + work_queue ----
+	assert client.get("/queue_status").json()["queued"] == 0
+	# 100 is new (gets ingested); 1 is already ingested (counted as exists).
+	# Distinct paths: the queue table enforces path UNIQUE.
+	api.db.enqueue_hashes([(100, str(images[0])), (1, str(images[1]))])
+	assert client.get("/queue_status").json()["queued"] == 2
+	r = client.post("/work_queue", json={"batch_size": 10})
+	body = r.json()
+	assert body["processed"] == 2, "work_queue should process the whole batch"
+	assert body["ingested"] == 1 and body["already_ingested"] == 1, "work_queue counts wrong"
+	assert body["remaining"] == 0, "queue should be empty after work_queue"
+	assert client.get("/queue_status").json()["queued"] == 0
 
 	# ---- buckets ----
 	r = client.post("/create_bucket", json={"bucket_name": "test-bucket"})
@@ -158,10 +210,13 @@ def main():
 	# ---- unload ----
 	r = client.post("/unload_model")
 	assert r.status_code == 200 and r.json()["loaded"] is False
+	# after unload, model-dependent endpoints 409 again
+	assert client.post("/eval_text", json={"text": "a cat"}).status_code == 409, "eval_text should 409 after unload"
 
 	api.config = real_config
 	api.db.DB.close()
 	api.db = real_db
+	api.model = real_model
 	print("ALL TESTS PASSED")
 
 

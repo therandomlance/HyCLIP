@@ -316,7 +316,7 @@ def update_config(req: UpdateConfigRequest):
 
 
 # ===== Web UI / Hydrus proxy =====
-app.include_router(build_router(db, model, config))
+app.include_router(build_router())
 
 # Mounted last so API routes take precedence
 app.mount("/webui", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "webui"), html=True), name="webui")
