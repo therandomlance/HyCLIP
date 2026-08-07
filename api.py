@@ -130,10 +130,6 @@ def ingest_image(req: IngestRequest):
 		raise HTTPException(status_code=404, detail=f"file not found: {path}")
 	except RuntimeError as E:
 		raise HTTPException(status_code=409, detail=E)
-	
-
-	embedding = model.ingest_image(req.hash_id, req.path)
-
 	if embedding is None:
 		return {"hash_id": hash_id, "status": "failed"}
 
@@ -166,13 +162,13 @@ def ingest_image_batch(req: IngestBatchRequest):
 	embeddings = model.eval_image_batch([req.items[i].path for i in to_eval], config.EVAL_WORKERS)
 
 	inserts = []
-	for hash_id, embedding in zip(to_eval, embeddings):
+	for i, embedding in zip(to_eval, embeddings):
+		item = req.items[i]
 		if embedding is None:
-			results.append({"hash_id": hash_id, "status": "failed"})
-			# raise HTTPException(status_code=422, detail=f"could not evaluate image: {req.items[i].path}")
-		
-		inserts.append(hash_id, embedding)
-		results.append({"hash_id": req.items[i].hash_id, "status": "ingested"})
+			results.append({"hash_id": item.hash_id, "status": "failed"})
+			continue
+		inserts.append((item.hash_id, embedding))
+		results.append({"hash_id": item.hash_id, "status": "ingested"})
 
 	for hash_id, embedding in inserts:
 		db.insert_embedding(hash_id, embedding)
@@ -278,7 +274,10 @@ def get_embedding(hash_id: int):
 
 @app.post("/delete_hash")
 def delete_hash(hash_id: int):
-	db.remove_embedding(hash_id)
+	try:
+		db.remove_embedding(hash_id)
+	except ValueError as e:
+		raise HTTPException(status_code=404, detail=str(e))
 	return {"hash_id": hash_id, "deleted": True}
 
 

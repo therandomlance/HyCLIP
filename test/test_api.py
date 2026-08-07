@@ -15,7 +15,7 @@ TEST_DIR = Path(__file__).resolve().parent
 IMG_DIR = TEST_DIR / "test_images"
 DB_PATH = TEST_DIR / "test.db"
 
-EMB_DIM = 768
+EMB_DIM = api.model.dims  # follow the configured model, not a hardcoded dim
 
 
 def get_images(n: int) -> list[Path]:
@@ -28,6 +28,7 @@ def main():
 	# Isolate from the real db/config so the test never touches them
 	if DB_PATH.exists():
 		DB_PATH.unlink()
+	real_db = api.db
 	api.db = HyCLIP_DB(str(DB_PATH))
 
 	real_config = api.config
@@ -105,7 +106,7 @@ def main():
 	assert r.status_code == 200 and r.json()["inserted"] == 0 and r.json()["unknown"] == [99999]
 
 	buckets = client.get("/list_buckets").json()
-	assert any(bucket_id in row for row in (buckets if isinstance(buckets[0], list) else [buckets])), buckets
+	assert any(bucket_id == row[0] for row in buckets), buckets
 
 	members = client.get("/list_bucket_members", params={"bucket_id": bucket_id}).json()
 	assert set(members) == {1, 10, 11}, members
@@ -113,12 +114,13 @@ def main():
 	# ---- search ----
 	r = client.post("/search", json={"embedding": text_emb, "num_results": 2})
 	assert r.status_code == 200
-	search_hits = [h for h, _ in (r.json() if isinstance(r.json()[0], list) else [r.json()])]
-	assert len(search_hits) >= 1, "global search returned nothing"
+	hits = r.json()
+	assert isinstance(hits, list) and len(hits) >= 1, f"global search returned nothing: {hits}"
 
 	r = client.post("/search_bucket", json={"embedding": text_emb, "bucket_id": bucket_id, "num_results": 5})
 	assert r.status_code == 200
 	bucket_hits = [h for h, _ in r.json()]
+	assert bucket_hits, "bucket search returned nothing"
 	assert set(bucket_hits) <= {1, 10, 11}, f"bucket search leaked: {bucket_hits}"
 
 	# ---- delete ----
@@ -126,9 +128,21 @@ def main():
 	assert r.status_code == 200 and r.json()["deleted"] is True
 	assert not api.db.exists_hash_id(12), "hash should be gone after delete"
 
+	# deleting a missing id should 404, not 500
+	r = client.post("/delete_hash", params={"hash_id": 12})
+	assert r.status_code == 404, "delete of missing hash should 404"
+
 	r = client.post("/delete_bucket", params={"bucket_id": bucket_id})
 	assert r.status_code == 200 and r.json()["deleted"] is True
 	assert not api.db.exists_bucket(bucket_id), "bucket should be gone after delete"
+
+	# ---- status / counts ----
+	assert isinstance(client.get("/num_embeddings").json(), int)
+	db_stat = client.get("/db_status").json()
+	assert {"quant_status", "last_search"} <= set(db_stat), "db_status missing keys"
+
+	# get_embedding for a missing id should 404
+	assert client.get("/get_embedding", params={"hash_id": 99999}).status_code == 404
 
 	# ---- config ----
 	cfg = client.get("/get_config").json()
@@ -147,6 +161,7 @@ def main():
 
 	api.config = real_config
 	api.db.DB.close()
+	api.db = real_db
 	print("ALL TESTS PASSED")
 
 

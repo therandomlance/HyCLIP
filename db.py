@@ -175,7 +175,9 @@ class HyCLIP_DB:
 		if self.bucket_is_init(bucket_id):
 			self.DB.executemany(f"DELETE FROM temp_bucket_{bucket_id} WHERE hash_id = ?", [(X,) for X in hash_ids])
 
-		self.quant_status = "needs_quant"
+		if self.last_search == f"bucket_{bucket_id}":
+			self.quant_status = "needs_quant"
+
 		self.commit()
 
 	def remove_bucket(self, bucket_id:int):

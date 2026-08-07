@@ -12,6 +12,7 @@ from config import HyCLIP_Config
 
 class HyDB():
 	def __init__(self, path:str):
+		path = "file:" + path
 		db_path = os.path.join(path, "client.master.db?mode=ro")
 		print(f"DB location: {db_path}")
 		self.DB = sql.connect(db_path, uri=True).cursor()
@@ -71,6 +72,7 @@ def main():
 	finished = False
 	T = Timer()
 
+	# TODO this could get pretty fat for very thick DBs
 	existing = set(DB.get_all_hash_ids())
 
 	for subfolder in os.listdir(FOLDER):

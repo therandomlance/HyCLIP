@@ -15,7 +15,7 @@ IMG_DIR = TEST_DIR / "test_images"
 DB_PATH = TEST_DIR / "test.db"
 
 EMB_DIM = 768  # must match the dims of the model used to generate embeddings
-N_FIXTURES = 6
+N_FIXTURES = 8  # >= N_EVAL in test_model.py so a fresh checkout passes
 
 
 def ensure_images():
@@ -23,7 +23,7 @@ def ensure_images():
 	IMG_DIR.mkdir(exist_ok=True)
 	existing = [f for f in IMG_DIR.iterdir() if f.suffix.lower() in (".jpg", ".png", ".jpeg")]
 	if existing:
-		return sorted(existing)
+		return sorted(existing)[:N_FIXTURES]
 
 	for i in range(N_FIXTURES):
 		img = Image.new("RGB", (64, 64), (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
@@ -66,7 +66,9 @@ def main():
 	assert db.exists_bucket(bucket_id)
 
 	db.add_to_bucket(bucket_id, hash_ids[:4])
-	assert db.quant_status == "needs_quant", "bucket change should mark db as needing quant"
+	# adding members only affects bucket searches; the last_search flip forces
+	# that bucket to re-quant without re-quantizing the (slow) global index
+	assert db.last_search == "global", "bucket change should force a bucket re-quant on next search"
 	assert db.get_bucket_size(bucket_id) == 4, "wrong bucket size"
 	assert db.get_bucket_name(bucket_id) == "test-bucket"
 
@@ -89,9 +91,9 @@ def main():
 	assert dists == sorted(dists), "results not ordered by distance"
 
 	# ---- bucket search ----
-	db.init_bucket(bucket_id, EMB_DIM)
+	db.init_bucket(bucket_id)
 	assert db.bucket_is_init(bucket_id), "bucket should be initialized"
-	bucket_results = db.search_bucket(make_embedding(1), bucket_id, num_results=2)
+	bucket_results = db.search_bucket(make_embedding(1), bucket_id, EMB_DIM, num_results=2)
 	assert len(bucket_results) == 2, "bucket search should return requested count"
 	assert all(h in set(hash_ids[:4]) for h, _ in bucket_results), "bucket search returned non-member"
 
