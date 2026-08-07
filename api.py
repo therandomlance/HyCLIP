@@ -67,10 +67,17 @@ class UpdateConfigRequest(BaseModel):
 
 
 # ===== Helpers =====
-def _require_model():
+def _assert_model_loaded():
 	if model.model is None:
 		raise HTTPException(status_code=409, detail="model not loaded")
 
+def _assert_hash_id(hash_id:int):
+	if not db.exists_hash_id(hash_id):
+		raise HTTPException(status_code=404, detail=f"hash_id not found: {hash_id}")
+
+def _assert_bucket_id(bucket_id:int):
+	if not db.exists_bucket(bucket_id):
+		raise HTTPException(status_code=404, detail=f"bucket_id not found: {bucket_id}")
 
 # ===== Server =====
 @app.get("/")
@@ -103,19 +110,19 @@ def model_status():
 # ===== Eval =====
 @app.post("/eval_image")
 def eval_image(req: PathRequest):
-	_require_model()
+	_assert_model_loaded()
 	return model.eval_image(req.path)
 
 @app.post("/eval_text")
 def eval_text(req: TextRequest):
-	_require_model()
+	_assert_model_loaded()
 	return model.tokenize_text(req.text)
 
 
 # ===== Ingest =====
 @app.post("/ingest_image")
 def ingest_image(req: IngestRequest):
-	_require_model()
+	_assert_model_loaded()
 
 	hash_id = req.hash_id
 	path = req.path
@@ -142,7 +149,7 @@ def ingest_image(req: IngestRequest):
 
 @app.post("/ingest_image_batch")
 def ingest_image_batch(req: IngestBatchRequest):
-	_require_model()
+	_assert_model_loaded()
 
 	results = []
 	to_eval = []
@@ -188,7 +195,7 @@ def queue_status():
 @app.post("/work_queue")
 def work_queue(req: ProcessBatchRequest):
 	"""Process one batch from the persistent queue; the caller loops for progress."""
-	_require_model()
+	_assert_model_loaded()
 
 	batch = db.get_next_queue(req.batch_size or config.INGEST_BATCH_SIZE) or []
 	if isinstance(batch, tuple):
@@ -231,17 +238,20 @@ def create_bucket(req: CreateBucketRequest):
 
 @app.post("/rename_bucket")
 def rename_bucket(req: RenameBucketRequest):
+	_assert_bucket_id(req.bucket_id)
 	db.rename_bucket(req.bucket_id, req.bucket_name)
 	return {"bucket_id": req.bucket_id, "bucket_name": req.bucket_name}
 
 @app.post("/insert_into_bucket")
 def insert_into_bucket(req: InsertBucketRequest):
+	_assert_bucket_id(req.bucket_id)
 	# TODO add options for non-inserted hash_ids: strict, loose, deferred
 	unknown = db.add_to_bucket(req.bucket_id, req.hash_ids)
 	return {"bucket_id": req.bucket_id, "inserted": len(req.hash_ids) - len(unknown), "unknown": unknown}
 
 @app.post("/remove_from_bucket")
 def remove_from_bucket(req: InsertBucketRequest):
+	_assert_bucket_id(req.bucket_id)
 	db.remove_from_bucket(req.bucket_id, req.hash_ids)
 	return {"bucket_id": req.bucket_id, "removed": len(req.hash_ids)}
 
@@ -251,15 +261,17 @@ def list_buckets():
 
 @app.get("/list_bucket_members")
 def list_bucket_members(bucket_id: int):
+	_assert_bucket_id(bucket_id)
 	return db.get_bucket_members(bucket_id)
 
 @app.get("/get_bucket_membership")
 def get_bucket_membership(hash_id: int):
+	_assert_hash_id(hash_id)
 	return db.get_bucket_membership(hash_id)
-
 
 @app.post("/delete_bucket")
 def delete_bucket(bucket_id: int):
+	_assert_bucket_id(bucket_id)
 	db.remove_bucket(bucket_id)
 	return {"bucket_id": bucket_id, "deleted": True}
 
@@ -267,17 +279,13 @@ def delete_bucket(bucket_id: int):
 # ===== Embeddings =====
 @app.get("/get_embedding")
 def get_embedding(hash_id: int):
-	try:
-		return db.get_embedding(hash_id)
-	except ValueError as e:
-		raise HTTPException(status_code=404, detail=str(e))
+	_assert_hash_id(hash_id)
+	return db.get_embedding(hash_id)
 
 @app.post("/delete_hash")
 def delete_hash(hash_id: int):
-	try:
-		db.remove_embedding(hash_id)
-	except ValueError as e:
-		raise HTTPException(status_code=404, detail=str(e))
+	_assert_hash_id(hash_id)
+	db.remove_embedding(hash_id)
 	return {"hash_id": hash_id, "deleted": True}
 
 

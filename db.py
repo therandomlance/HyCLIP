@@ -44,12 +44,10 @@ class HyCLIP_DB:
 		self.clean_queue()
 
 	def __del__(self):
-		try:
-			if self.DB is not None:
-				self.clean_temp_buckets()
-				self.clean_queue()
-		except Exception:
-			pass
+		if self.DB is not None:
+			self.clean_temp_buckets()
+			self.clean_queue()
+			self.DB.close()
 
 	def commit(self):
 		self.DB.commit()
