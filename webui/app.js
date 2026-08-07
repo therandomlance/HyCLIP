@@ -5,7 +5,8 @@
 // ===== Vector math =====
 function normalize(v) {
 	const mag = Math.hypot(...v);
-	return mag === 0 ? v : v.map((x) => x / mag);
+	// ponytail: zero vector (weights cancel) → null so the caller rejects instead of searching with [0,0,…]
+	return mag === 0 ? null : v.map((x) => x / mag);
 }
 
 // ===== State =====
@@ -77,6 +78,12 @@ function refreshPromptRemoveButtons() {
 let hoverTimer = null;
 const HOVER_DELAY = 400;
 
+// ponytail: only blob: URLs need revoking; server URLs are reused across refs
+function revokeRefURLs(r) {
+	if (r.thumbURL?.startsWith("blob:")) URL.revokeObjectURL(r.thumbURL);
+	if (r.previewURL?.startsWith("blob:")) URL.revokeObjectURL(r.previewURL);
+}
+
 function showHoverPreview(src, anchor) {
 	const pv = $("#hover-preview");
 	const r = anchor.getBoundingClientRect();
@@ -136,7 +143,8 @@ function addRef(ref) {
 	rm.className = "btn remove-btn"; rm.textContent = "✕"; rm.title = "Remove";
 	rm.onclick = () => {
 		hideHoverPreview();
-		state.refs.splice(state.refs.indexOf(r), 1);
+		const idx = state.refs.indexOf(r);
+		if (idx >= 0) { revokeRefURLs(r); state.refs.splice(idx, 1); }
 		el.remove();
 		status(`${state.refs.length} reference image(s)`);
 		refreshHasInput();
@@ -223,7 +231,7 @@ async function performSearch() {
 	try {
 		await resolvePromptVectors();
 		const vec = combineVectors();
-		if (!vec) { displayResults([]); status("No search inputs"); return; }
+		if (!vec) { displayResults([]); status("Search terms cancelled out (zero vector) — adjust weights/signs"); return; }
 
 		const num = parseInt($("#count-input").value) || 30;
 		// A search always quantizes when the current scope isn't ready — show it now, sync via heartbeat after.
@@ -446,6 +454,7 @@ async function init() {
 	$("#search-btn").onclick = performSearch;
 	$("#clear-btn").onclick = () => {
 		hideHoverPreview();
+		for (const r of state.refs) revokeRefURLs(r);
 		state.refs = [];
 		$("#ref-list").replaceChildren();
 		$("#prompt-list").replaceChildren();

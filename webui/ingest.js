@@ -64,6 +64,7 @@ $("#start-btn").onclick = async () => {
 			counts.already += r.already_ingested;
 			counts.skipped += r.skipped;
 			counts.errors += r.errors;
+			total = await refreshQueueCount();
 			redraw(total - r.remaining, total);
 			status(stopRequested ? "Stopping…" : "Processing…");
 		}

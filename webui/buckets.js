@@ -20,7 +20,9 @@ async function refreshBuckets() {
 		try {
 			const members = await api(`/list_bucket_members?bucket_id=${id}`);
 			label.textContent = `${name} (${members.length})`;
-		} catch {}
+		} catch {
+			label.textContent = `${name} (?)`;
+		}
 		const ren = document.createElement("button");
 		ren.className = "btn remove-btn"; ren.textContent = "✎"; ren.title = "Rename bucket";
 		ren.onclick = () => {
@@ -49,11 +51,13 @@ async function refreshBuckets() {
 		};
 		const del = document.createElement("button");
 		del.className = "btn remove-btn"; del.textContent = "✕"; del.title = "Delete bucket";
-		del.onclick = async () => {
-			if (!confirm(`Delete bucket "${name}"?`)) return;
+	del.onclick = async () => {
+		if (!confirm(`Delete bucket "${name}"?`)) return;
+		try {
 			await api(`/delete_bucket?bucket_id=${id}`, { method: "POST" });
 			refreshBuckets();
-		};
+		} catch (e) { status(`Error deleting bucket: ${e.message}`); }
+	};
 		row.append(label, ren, del);
 		list.append(row);
 	}
@@ -90,7 +94,7 @@ $("#add-hashes").onclick = async () => {
 		// Ingest the pending files in batches, adding each newly-ingested batch to the bucket
 		const pending = r.pending;
 		const BATCH = 20;
-		let ingested = 0, skipped = 0, errors = 0;
+		let ingested = 0, skipped = 0, already = 0, errors = 0;
 		if (pending.length) {
 			step.textContent = "Step 2: Ingesting new images…";
 			const ms = await api("/model_status");
@@ -106,26 +110,34 @@ $("#add-hashes").onclick = async () => {
 		for (let i = 0; i < pending.length; i += BATCH) {
 			const chunk = pending.slice(i, i + BATCH);
 			status(`Ingesting ${Math.min(i + BATCH, pending.length)}/${pending.length}…`);
-			const results = await post("/ingest_image_batch", { items: chunk });
-			const newIds = [];
-			for (const res of results) {
-				if (res.status === "ingested") newIds.push(res.hash_id);
-				else if (res.status === "skipped") skipped++;
-			}
-			errors += chunk.length - results.length;
-			if (newIds.length) {
-				await post("/insert_into_bucket", { bucket_id: Number(bucketId), hash_ids: newIds });
-				ingested += newIds.length;
+			try {
+				const results = await post("/ingest_image_batch", { items: chunk });
+				const newIds = [];
+				for (const res of results) {
+					if (res.status === "ingested") newIds.push(res.hash_id);
+					else if (res.status === "already_ingested") already++;
+					else if (res.status === "skipped") skipped++;
+					else if (res.status === "failed") errors++;
+				}
+				if (newIds.length) {
+					await post("/insert_into_bucket", { bucket_id: Number(bucketId), hash_ids: newIds });
+					ingested += newIds.length;
+				}
+			} catch (e) {
+				// A 404 (or other batch failure) aborts just this chunk; keep going so one
+				// missing file can't kill the whole run.
+				errors += chunk.length;
+				status(`Chunk ${i / BATCH + 1} failed: ${e.message}`);
 			}
 			bar.value = Math.min(i + BATCH, pending.length);
-			counts.textContent = `${bar.value}/${pending.length} | ingested: ${ingested}  skipped: ${skipped}  errors: ${errors}`;
+			counts.textContent = `${bar.value}/${pending.length} | ingested: ${ingested}  skipped: ${skipped}  already: ${already}  errors: ${errors}`;
 		}
 
 		const out = $("#add-result");
 		out.replaceChildren();
 		const summary = document.createElement("p");
-		summary.textContent = `Added ${r.added + ingested} to bucket (${r.added} already ingested, ${ingested} newly ingested), ` +
-			`${skipped + errors} failed, ${r.already_queued} were already in the ingest queue, ${r.unknown.length} unknown.`;
+		summary.textContent = `Added ${r.added + ingested + already} to bucket (${r.added + already} already ingested, ${ingested} newly ingested), ` +
+			`${skipped} skipped, ${errors} failed, ${r.already_queued} already in queue, ${r.unknown.length} unknown.`;
 		out.append(summary);
 		if (r.unknown.length) {
 			const pre = document.createElement("pre");

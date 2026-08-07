@@ -133,7 +133,9 @@ async function heartbeatTick() {
 	}
 	scheduleHeartbeat();
 }
-function pokeHeartbeat() { heartbeatTick(); }
+// Clear the pending 10s timer before ticking so a poke during a pending tick
+// can't overlap a second tick during the await window.
+function pokeHeartbeat() { clearTimeout(heartbeatTimer); heartbeatTick(); }
 
 function buildTopbar() {
 	const bar = $("#topbar");
