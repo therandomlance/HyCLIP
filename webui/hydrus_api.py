@@ -20,9 +20,9 @@ class AddHashesToBucketRequest(BaseModel):
 def build_router(db, model, config):
 	router = APIRouter()
 
-	def _require_model():
-		if model.model is None:
-			raise HTTPException(status_code=409, detail="model not loaded")
+	# def _require_model():
+	# 	if model.model is None:
+	# 		raise HTTPException(status_code=409, detail="model not loaded")
 
 	def _hydrus():
 		if not config.API_KEY:

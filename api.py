@@ -67,8 +67,6 @@ class UpdateConfigRequest(BaseModel):
 
 
 # ===== Helpers =====
-SKIPPED = object()
-
 def _require_model():
 	if model.model is None:
 		raise HTTPException(status_code=409, detail="model not loaded")
@@ -124,18 +122,17 @@ def ingest_image(req: IngestRequest):
 	
 	if db.exists_hash_id(hash_id):
 		return {"hash_id": hash_id, "status": "already_ingested"}
-	if not model.check_filetype(req.hash_id):
+	if not model.check_filetype(path):
 		return {"hash_id": hash_id, "status": "skipped"}
-	
 	try:
 		embedding = model.eval_image(path)
 	except FileNotFoundError: 
 		raise HTTPException(status_code=404, detail=f"file not found: {path}")
 	except RuntimeError as E:
-		raise HTTPException(status_code=409, detail=E.response.text)
+		raise HTTPException(status_code=409, detail=E)
 	
 
-	embedding = _ingest_image(req.hash_id, req.path)
+	embedding = model.ingest_image(req.hash_id, req.path)
 
 	if embedding is None:
 		return {"hash_id": hash_id, "status": "failed"}
@@ -151,32 +148,35 @@ def ingest_image(req: IngestRequest):
 def ingest_image_batch(req: IngestBatchRequest):
 	_require_model()
 
-	results = [None] * len(req.items)
+	results = []
 	to_eval = []
 
 	for i, item in enumerate(req.items):
 		if not os.path.exists(item.path):
 			raise HTTPException(status_code=404, detail=f"file not found: {item.path}")
 		if db.exists_hash_id(item.hash_id):
-			results[i] = {"hash_id": item.hash_id, "status": "already_ingested"}
+			results.append({"hash_id": item.hash_id, "status": "already_ingested"})
 			continue
 		if not model.check_filetype(item.path):
 			print(f"skipping unsupported filetype: {item.path}")
-			results[i] = {"hash_id": item.hash_id, "status": "skipped"}
+			results.append({"hash_id": item.hash_id, "status": "skipped"})
 			continue
 		to_eval.append(i)
 
 	embeddings = model.eval_image_batch([req.items[i].path for i in to_eval], config.EVAL_WORKERS)
 
 	inserts = []
-	for i, embedding in zip(to_eval, embeddings):
+	for hash_id, embedding in zip(to_eval, embeddings):
 		if embedding is None:
-			raise HTTPException(status_code=422, detail=f"could not evaluate image: {req.items[i].path}")
-		inserts.append((req.items[i].hash_id, embedding))
-		results[i] = {"hash_id": req.items[i].hash_id, "status": "ingested"}
+			results.append({"hash_id": hash_id, "status": "failed"})
+			# raise HTTPException(status_code=422, detail=f"could not evaluate image: {req.items[i].path}")
+		
+		inserts.append(hash_id, embedding)
+		results.append({"hash_id": req.items[i].hash_id, "status": "ingested"})
 
 	for hash_id, embedding in inserts:
 		db.insert_embedding(hash_id, embedding)
+
 	db.quant_status = "needs_quant"
 	db.commit()
 	db.dequeue_hashes([hash_id for hash_id, _ in inserts])
@@ -275,7 +275,7 @@ def get_embedding(hash_id: int):
 		return db.get_embedding(hash_id)
 	except ValueError as e:
 		raise HTTPException(status_code=404, detail=str(e))
-		
+
 @app.post("/delete_hash")
 def delete_hash(hash_id: int):
 	db.remove_embedding(hash_id)

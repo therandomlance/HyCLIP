@@ -19,9 +19,6 @@ class HyCLIP_DB:
 				embedding BLOB
 			);
 
-			CREATE INDEX IF NOT EXISTS embeddings_index
-			ON embeddings ( hash_id );
-
 			CREATE TABLE IF NOT EXISTS buckets (
 				bucket_id INTEGER PRIMARY KEY AUTOINCREMENT,
 				bucket_name TEXT UNIQUE
@@ -117,6 +114,10 @@ class HyCLIP_DB:
 		for bucket_id in self.get_bucket_membership(hash_id):
 			self.remove_from_bucket(bucket_id, hash_id)
 		self._delete("embeddings", ("hash_id", hash_id))
+
+		# Might not be necessary but holding onto it for now
+		# self.quant_status = "needs_quant"
+		
 		self.commit()
 
 	def get_embedding(self, hash_id:int) -> list[float]:
@@ -136,7 +137,8 @@ class HyCLIP_DB:
 		return self._exists("embeddings", ("hash_id", hash_id))
 
 	def get_all_hash_ids(self):
-		return self.qe("SELECT hash_id FROM embeddings")
+		res = self.DB.execute("SELECT hash_id FROM embeddings").fetchall()
+		return [X[0] for X in res]
 
 	# ===== Buckets =====
 	# Buckets are a persistent group of images that can be searched on together
@@ -346,6 +348,7 @@ class HyCLIP_DB:
 	def quant_prepare(self, table_name:str, model_dims:int=768):
 		self.quant_status = "quantizing"
 		try:
+			self.quantize_preload_cleanup(table_name)
 			self.vector_init(table_name, model_dims)
 			self.vector_quantize(table_name)
 			self.quantize_preload(table_name)

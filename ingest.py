@@ -12,7 +12,7 @@ from config import HyCLIP_Config
 
 class HyDB():
 	def __init__(self, path:str):
-		db_path = os.path.join(path, "client.master.db")
+		db_path = os.path.join(path, "client.master.db?mode=ro")
 		print(f"DB location: {db_path}")
 		self.DB = sql.connect(db_path, uri=True).cursor()
 
@@ -86,7 +86,7 @@ def main():
 		for file in files:
 			F = Path(file)
 
-			if not MODEL.check_filetype(F.suffix):
+			if not MODEL.check_filetype(file):
 				T.skipped_filetype += 1
 				continue
 
@@ -130,7 +130,7 @@ def main():
 				DB.insert_embedding(hash_id, embedding)
 				T.ingested += 1
 
-				if MAX_EVAL != -1 and ingested >= MAX_EVAL:
+				if MAX_EVAL != -1 and T.ingested >= MAX_EVAL:
 					finished = True 
 					break
 

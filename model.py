@@ -26,11 +26,11 @@ class HyCLIP_Model():
 		if not os.path.isfile(filepath):
 			raise FileNotFoundError(f"model.py: filepath not found: {filepath}")
 
-	def _assert_model_loaded():
+	def _assert_model_loaded(self):
 		if not self.model:
 			raise RuntimeError(f"Model not loaded! - {self.model_name}")
 
-	def check_filetype(self, filepath):
+	def check_filetype(self, filepath:str):
 		IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 		return os.path.splitext(filepath)[1].lower() in IMAGE_EXTS
 	
