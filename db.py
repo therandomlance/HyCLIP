@@ -4,7 +4,7 @@ import os
 import array
 
 class HyCLIP_DB:
-	def __init__(self, filename="hyclip.db"):
+	def __init__(self, filename="hyclip.db", verbose:bool=True):
 		# TODO scaffolding for per-model dbs, probably outside of this class
 		self.DB = sql.connect(filename, check_same_thread=False)
 
@@ -39,6 +39,7 @@ class HyCLIP_DB:
 
 		self.quant_status = "needs_quant"
 		self.last_search = None
+		self.VERBOSE = verbose
 
 		self.clean_temp_buckets()
 		self.clean_queue()
@@ -361,7 +362,8 @@ class HyCLIP_DB:
 	def show_quantize_preload_size(self, table_name:str) -> int:
 		Q = f"SELECT vector_quantize_memory('{table_name}', 'embedding')"
 		size = self.qe(Q)
-		print(f"Quantize preload size: {size}")
+		if self.VERBOSE:
+			print(f"Quantize preload size: {size}")
 		return size
 	
 	def vector_init(self, table_name:str, dimensions:int):
@@ -370,9 +372,13 @@ class HyCLIP_DB:
 
 	# Returns the amount of successfully quantized rows 
 	def vector_quantize(self, table_name:str) -> int:
-		print("Quantizing...")
+		if self.VERBOSE:
+			print("Quantizing...")
 		quant = self.qe(f"SELECT vector_quantize('{table_name}', 'embedding')")
-		print(f'Quantized: {quant}')
+		
+		if self.VERBOSE:
+			print(f'Quantized: {quant}')
+		
 		return quant
 	
 	def quantize_preload(self, table_name:str):

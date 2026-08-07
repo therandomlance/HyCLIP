@@ -43,7 +43,7 @@ def main():
 	if DB_PATH.exists():
 		DB_PATH.unlink()
 
-	db = HyCLIP_DB(str(DB_PATH))
+	db = HyCLIP_DB(str(DB_PATH), verbose=False)
 	hash_ids = list(range(1, len(images) + 1))
 
 	# ---- ingest embeddings ----

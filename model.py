@@ -7,15 +7,21 @@ import concurrent.futures
 from huggingface_hub import snapshot_download
 
 class HyCLIP_Model():
-	def __init__(self, model_name):
+	def __init__(self, model_name, verbose:bool=True):
 		self.model_name = model_name
 		self.PRETRAINED_TAG = "webli"
-		print(f"model: {model_name}")
-		print("loading config...")
+		self.VERBOSE = verbose
+		
+		if self.VERBOSE:
+			print(f"model: {model_name}")
+			print("loading config...")
+		
 		self.config = open_clip.get_model_config(self.model_name)
 		self.dims = self.config["embed_dim"]
 
-		print("getting device...")
+		if self.VERBOSE:
+			print("getting device...")
+
 		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 		self.model = None
@@ -45,7 +51,8 @@ class HyCLIP_Model():
 			return None
 
 	def load_model(self):
-		print("loading model...")
+		if self.VERBOSE:
+			print("loading model...")
 		path = self.cached_path()
 		if path:
 			# Already cached locally - load without pinging huggingface
@@ -58,7 +65,8 @@ class HyCLIP_Model():
 		self.model.to(self.device)
 		self.model.eval()
 
-		print(f"model loaded: {self.model_name}")
+		if self.VERBOSE:
+			print(f"model loaded: {self.model_name}")
 
 	def unload_model(self):
 		self.model = None

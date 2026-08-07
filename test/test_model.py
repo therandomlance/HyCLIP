@@ -22,7 +22,7 @@ def main():
 	cfg = HyCLIP_Config()
 	model_name = cfg.CLIP_MODEL
 
-	model = HyCLIP_Model(model_name)
+	model = HyCLIP_Model(model_name, verbose=False)
 	assert model.dims == model.config["embed_dim"], "dims should match config"
 
 	# ---- load / unload ----
