@@ -51,23 +51,30 @@ $("#start-btn").onclick = async () => {
 	};
 
 	try {
-		status("Loading model…");
-		await api("/load_model", { method: "POST" });
+		// hyclip.modelLoaded is kept fresh by the shared heartbeat; /load_model is idempotent server-side
+		if (!hyclip.modelLoaded) {
+			status("Loading model…");
+			await api("/load_model", { method: "POST" });
+		}
 
-		const total = await refreshQueueCount();
+		let total = await refreshQueueCount();
+		let done = 0;
 		redraw(0, total);
 
-		while (total > 0 && !stopRequested) {
+		let remaining = total;
+		while (remaining > 0 && !stopRequested) {
 			const r = await post("/work_queue", { batch_size: batchSize });
 			if (!r.processed) break;
 			counts.ingested += r.ingested;
 			counts.already += r.already_ingested;
 			counts.skipped += r.skipped;
 			counts.errors += r.errors;
-			total = await refreshQueueCount();
-			redraw(total - r.remaining, total);
+			done += r.ingested + r.already_ingested + r.skipped + r.errors;
+			remaining = r.remaining;
+			redraw(done, total);
 			status(stopRequested ? "Stopping…" : "Processing…");
 		}
+		$("#queue-count").textContent = remaining;
 		status(stopRequested ? "Stopped — progress is kept in the queue" : "Done");
 	} catch (e) { status(`Error: ${e.message}`); }
 
