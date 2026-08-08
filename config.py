@@ -20,27 +20,11 @@ class HyCLIP_Config:
 		"INGEST_BATCH_SIZE": 20
 	}
 
-	def __init__(self):
-		self.load_config()
+	def __init__(self, cfg_path:str="config.json"):
+		self.load_config(cfg_path)
 
-	# Platform-agnostic config location:
-	#   Windows: %APPDATA%/hyclip/config.json
-	#   macOS:   ~/Library/Application Support/hyclip/config.json
-	#   Linux:   $XDG_CONFIG_HOME/hyclip/config.json (default ~/.config)
-	def _config_path(self) -> Path:
-		system = platform.system()
-		if system == "Windows":
-			base = Path(os.environ.get("APPDATA", Path.home()))
-		elif system == "Darwin":
-			base = Path.home() / "Library" / "Application Support"
-		else:
-			base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-
-		return base / "hyclip" / "config.json"
-
-	def load_config(self):
-		self.config_path = self._config_path()
-
+	def load_config(self, path):
+		self.config_path = path
 		try:
 			with open(self.config_path) as F:
 				cfg = json.load(F)
@@ -56,8 +40,6 @@ class HyCLIP_Config:
 	def save_config(self):
 		for key in self.cfg:
 			self.cfg[key] = getattr(self, key)
-
-		self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
 		with open(self.config_path, "w") as F:
 			json.dump(self.cfg, F, indent=4)
