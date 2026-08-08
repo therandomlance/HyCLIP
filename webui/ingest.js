@@ -6,10 +6,10 @@ let stopRequested = false;
 async function refreshQueueCount() {
 	try {
 		const { queued } = await api("/queue_status");
-		$("#queue-count").textContent = queued;
+		const el = $("#queue-count");
+		if (el) el.textContent = queued;
 		return queued;
 	} catch (e) {
-		$("#queue-count").textContent = "?";
 		status(`Error: ${e.message}`);
 		return 0;
 	}
@@ -74,13 +74,15 @@ $("#start-btn").onclick = async () => {
 			redraw(done, total);
 			status(stopRequested ? "Stopping…" : "Processing…");
 		}
-		$("#queue-count").textContent = remaining;
+		const q = $("#queue-count");
+		if (q) q.textContent = remaining;
 		status(stopRequested ? "Stopped — progress is kept in the queue" : "Done");
 	} catch (e) { status(`Error: ${e.message}`); }
 
 	$("#stop-btn").hidden = true;
 	$("#start-btn").hidden = false;
 	running = false;
+	stopRequested = false;
 	refreshQueueCount();
 };
 
