@@ -102,7 +102,9 @@ class HyCLIP_DB:
 	# ===== Embeddings =====
 	def insert_embedding(self, hash_id:int, embedding:list[float]):
 		# IMPORTANT: DOES NOT AUTO-COMMIT
-		Q = f"INSERT INTO embeddings (hash_id, embedding) VALUES ( ?, vector_as_f32(?) )"
+		# OR IGNORE: a client can abort mid-batch and re-pull the same rows while the
+		# server finishes the old one — duplicate inserts are identical anyway
+		Q = f"INSERT OR IGNORE INTO embeddings (hash_id, embedding) VALUES ( ?, vector_as_f32(?) )"
 		A = [hash_id, str(embedding)]
 		self.DB.execute(Q, A)
 	

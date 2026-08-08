@@ -94,8 +94,9 @@ def exit():
 # ===== Model =====
 @app.post("/load_model")
 def load_model():
-	model.load_model()
-	return {"model": model.model_name, "loaded": True}
+	if model.model is None:
+		model.load_model()
+	return {"model": model.model_name, "loaded": model.model is not None}
 
 @app.post("/unload_model")
 def unload_model():
@@ -327,4 +328,10 @@ def update_config(req: UpdateConfigRequest):
 app.include_router(build_router())
 
 # Mounted last so API routes take precedence
-app.mount("/webui", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "webui"), html=True), name="webui")
+class NoCacheStaticFiles(StaticFiles):
+	async def get_response(self, path, scope):
+		r = await super().get_response(path, scope)
+		r.headers["Cache-Control"] = "no-cache"  # revalidate every load; stale JS has bitten us before
+		return r
+
+app.mount("/webui", NoCacheStaticFiles(directory=os.path.join(os.path.dirname(__file__), "webui"), html=True), name="webui")
