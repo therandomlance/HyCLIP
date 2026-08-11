@@ -61,8 +61,9 @@ def main():
 	HY = HyDB(DB_PATH)
 
 	CFG = HyCLIP_Config()
-	DB = HyCLIP_DB()
 	MODEL = HyCLIP_Model(CFG.CLIP_MODEL)
+	DB = HyCLIP_DB(MODEL.dims, CFG.VECTOR_QUANT)
+	
 	MODEL.load_model()
 
 	FOLDER = args.folder

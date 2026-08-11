@@ -31,7 +31,6 @@ def main():
 	if DB_PATH.exists():
 		DB_PATH.unlink()
 	real_db = api.db
-	api.db = HyCLIP_DB(str(DB_PATH), verbose=False)
 
 	real_config = api.config
 	api.config = HyCLIP_Config()
@@ -45,6 +44,7 @@ def main():
 	real_model = api.model
 	api.model = HyCLIP_Model(api.config.CLIP_MODEL, verbose=False)
 	EMB_DIM = api.model.dims  # follow the configured model, not a hardcoded dim
+	api.db = HyCLIP_DB(EMB_DIM, api.config.VECTOR_QUANT, str(DB_PATH), verbose=False)
 
 	client = TestClient(api.app)
 

@@ -11,9 +11,9 @@ from model import HyCLIP_Model
 from config import HyCLIP_Config
 from webui.hydrus_api import build_router
 
-db = HyCLIP_DB()
 config = HyCLIP_Config()
 model = HyCLIP_Model(config.CLIP_MODEL)
+db = HyCLIP_DB(model.dims, config.VECTOR_QUANT)
 
 @asynccontextmanager
 async def lifespan(_):

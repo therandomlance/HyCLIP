@@ -4,7 +4,7 @@ import os
 import array
 
 class HyCLIP_DB:
-	def __init__(self, filename="hyclip.db", verbose:bool=True):
+	def __init__(self, model_dims:int, quant:str, filename="hyclip.db", verbose:bool=True):
 		# TODO scaffolding for per-model dbs, probably outside of this class
 		self.DB = sql.connect(filename, check_same_thread=False)
 
@@ -37,6 +37,8 @@ class HyCLIP_DB:
 		''')
 		self.commit()
 
+		self.model_dims = model_dims
+		self.quant = quant
 		self.quant_status = "needs_quant"
 		self.last_search = None
 		self.VERBOSE = verbose
@@ -237,7 +239,7 @@ class HyCLIP_DB:
 	# ===== Global Search =====
 	def search_embedding(self, embedding:list[float], model_dims, num_results=100) -> list[tuple[int, float]]:
 		if self.quant_status != "ready" or self.last_search != "global":
-			self.quant_prepare("embeddings", model_dims)
+			self.quant_prepare("embeddings", self.model_dims, self.quant)
 
 		Q = f'''
 			SELECT hash_id, v.distance
@@ -297,7 +299,7 @@ class HyCLIP_DB:
 		table_name = f'temp_bucket_{bucket_id}'
 
 		if self.quant_status != "ready" or self.last_search != f"bucket_{bucket_id}":
-			self.quant_prepare(table_name, model_dims)
+			self.quant_prepare(table_name, self.model_dims, self.quant)
 
 		Q = f'''
 			SELECT hash_id, v.distance
@@ -359,12 +361,12 @@ class HyCLIP_DB:
 	# TODO Make sure these old methods still work with the new DB
 
 	# quant_status transitions: needs_quant -> quantizing -> ready (back to needs_quant on failure)
-	def quant_prepare(self, table_name:str, model_dims:int=768):
+	def quant_prepare(self, table_name:str, model_dims:int=768, quant:str="UINT8"):
 		self.quant_status = "quantizing"
 		try:
 			self.quantize_preload_cleanup(table_name)
 			self.vector_init(table_name, model_dims)
-			self.vector_quantize(table_name)
+			self.vector_quantize(table_name, quant)
 			self.quantize_preload(table_name)
 			self.commit()
 		except Exception:
@@ -384,10 +386,10 @@ class HyCLIP_DB:
 		self.DB.execute(Q)
 
 	# Returns the amount of successfully quantized rows 
-	def vector_quantize(self, table_name:str) -> int:
+	def vector_quantize(self, table_name:str, quant:str) -> int:
 		if self.VERBOSE:
 			print("Quantizing...")
-		quant = self.qe(f"SELECT vector_quantize('{table_name}', 'embedding')")
+		quant = self.qe(f"SELECT vector_quantize('{table_name}', 'embedding', 'qtype={quant}')")
 		
 		if self.VERBOSE:
 			print(f'Quantized: {quant}')

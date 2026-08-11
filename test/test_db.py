@@ -9,10 +9,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PIL import Image
 from db import HyCLIP_DB
+from config import HyCLIP_Config
 
 TEST_DIR = Path(__file__).resolve().parent
 IMG_DIR = TEST_DIR / "test_images"
 DB_PATH = TEST_DIR / "test.db"
+
+cfg = HyCLIP_Config()
+QUANT = cfg.VECTOR_QUANT
 
 EMB_DIM = 768  # must match the dims of the model used to generate embeddings
 N_FIXTURES = 8  # >= N_EVAL in test_model.py so a fresh checkout passes
@@ -43,7 +47,7 @@ def main():
 	if DB_PATH.exists():
 		DB_PATH.unlink()
 
-	db = HyCLIP_DB(str(DB_PATH), verbose=False)
+	db = HyCLIP_DB(EMB_DIM, QUANT, str(DB_PATH), verbose=False)
 	hash_ids = list(range(1, len(images) + 1))
 
 	# ---- ingest embeddings ----
@@ -82,7 +86,7 @@ def main():
 	assert set(members) == set(hash_ids[:4]), "members don't match"
 
 	# ---- global search ----
-	db.quant_prepare("embeddings")
+	db.quant_prepare("embeddings", EMB_DIM, QUANT)
 	assert db.quant_status == "ready", "quant status should be ready after quant_prepare"
 	results = db.search_embedding(make_embedding(0), EMB_DIM, num_results=3)
 	assert db.last_search == "global", "global search should record last_search"
