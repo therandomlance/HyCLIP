@@ -1,6 +1,6 @@
 # HyCLIP
 
-Search your [Hydrus](https://hydrusnetwork.github.io/hydrus/) library by *what's in the picture*, not just its tags. Point HyCLIP at your Hydrus client and it builds a searchable index of your images, so you can find them by describing what you're looking for in a text prompt, or by uploading a reference image that looks like what you want.
+Search your [Hydrus](https://hydrusnetwork.github.io/hydrus/) library using CLIP embeddings. Point HyCLIP at your Hydrus client and it builds a searchable index of your images, so you can find them by describing what you're looking for in a text prompt, or by uploading a reference image that looks like what you want.
 
 ## How it works
 
@@ -37,7 +37,7 @@ Open `http://localhost:8000/webui/index.html`. Four tabs:
 
 ## Configuration
 
-Config lives in `config.json` (platform-appropriate location: `%APPDATA%/hyclip/` on Windows, `~/Library/Application Support/hyclip/` on macOS, `~/.config/hyclip/` on Linux). File values override defaults; see `config.py` for the full default set.
+Config lives in `config.json`, generated on first run. Config can be updated and saved through the webui, or directly in the json.
 
 Key options:
 
@@ -53,7 +53,7 @@ Key options:
 
 ## Ingesting from Hydrus
 
-`ingest.py` scans your Hydrus `client_files` folder and writes embeddings straight into `hyclip.db` — no server needed. It reads Hydrus's `client.master.db` read-only to map the sha256-hash filenames to their file ids. Run it from the repo root so it writes to the same `hyclip.db` the server uses:
+`ingest.py` scans your Hydrus `client_files` folder and writes embeddings straight into `hyclip.db`. It reads Hydrus's `client.master.db` read-only to map the sha256-hash filenames to their file ids.
 
 ```bash
 .venv/bin/python ingest.py /path/to/hydrus/db /path/to/client_files
@@ -65,20 +65,3 @@ Already-ingested files are skipped, so an interrupted run can be resumed by re-r
 ## API
 
 See [API.md](API.md) for the full endpoint reference.
-
-## Project layout
-
-- `api.py` — FastAPI server and routes
-- `db.py` — SQLite + vector search, buckets, ingest queue
-- `model.py` — open_clip model load/eval (image + text)
-- `config.py` — config load/save
-- `ingest.py` — direct Hydrus→HyCLIP bulk ingest (reads `client.master.db` + `client_files` directly, no server)
-- `webui/` — static web UI and the Hydrus proxy router (`hydrus_api.py`)
-
-## Tests
-
-```bash
-.venv/bin/python test/test_db.py
-.venv/bin/python test/test_model.py
-.venv/bin/python test/test_api.py
-```

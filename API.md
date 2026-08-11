@@ -273,7 +273,7 @@ Quantization status of the search index, polled by the web UI's DB status dot. `
 {"quant_status": "ready", "last_search": "bucket_3"}
 ```
 
-Takes an embedding (from `eval_image`/`eval_text`) and returns the nearest `hash_id`s ordered by distance (ascending). Both return arrays and auto-initialize their search tables on first use.
+Takes an embedding (from `eval_image`/`eval_text`) or a `hash_id` and returns the nearest `hash_id`s ordered by distance (ascending). Both variants return arrays and auto-initialize their search tables on first use.
 
 ### `POST /search`
 Global search across all embeddings (re-quantizes the embeddings table on each call).
@@ -315,6 +315,33 @@ Search only within a bucket (builds the bucket's temp table on first search).
   [222, 0.1023]
 ]
 ```
+
+### `POST /search_id`
+Same as `/search`, but the query is an already-ingested `hash_id` (its stored embedding is looked up first). **404** if the `hash_id` isn't ingested.
+
+**Request**
+```json
+{
+  "hash_id": 111,
+  "num_results": 10
+}
+```
+
+**Response** (same shape as `/search`)
+
+### `POST /search_id_bucket`
+Same as `/search_bucket`, but the query is an already-ingested `hash_id`. **404** if the `hash_id` or `bucket_id` doesn't exist.
+
+**Request**
+```json
+{
+  "hash_id": 111,
+  "bucket_id": 1,
+  "num_results": 10
+}
+```
+
+**Response** (same shape as `/search_bucket`)
 
 ## Config
 

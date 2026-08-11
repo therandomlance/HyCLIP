@@ -235,7 +235,7 @@ class HyCLIP_DB:
 
 	# ========== Search ==========
 	# ===== Global Search =====
-	def search_global(self, embedding:list[float], model_dims, num_results=100) -> list[tuple[int, float]]:
+	def search_embedding(self, embedding:list[float], model_dims, num_results=100) -> list[tuple[int, float]]:
 		if self.quant_status != "ready" or self.last_search != "global":
 			self.quant_prepare("embeddings", model_dims)
 
@@ -254,6 +254,10 @@ class HyCLIP_DB:
 			return [results] if isinstance(results, tuple) else results
 		else:
 			return []
+
+	def search_id(self, hash_id:int, model_dims:int, num_results:int=100) -> list[tuple[int, float]]:
+		search_emb = self.get_embedding(hash_id)
+		return self.search_embedding(search_emb, model_dims, num_results)
 
 	# ===== Bucket Search =====
 	def init_bucket(self, bucket_id:int):
@@ -284,7 +288,7 @@ class HyCLIP_DB:
 		A = [f"temp_bucket_{bucket_id}"]
 		return bool(self.qe(Q, A))
 
-	def search_bucket(self, embedding:list[float], bucket_id:int, model_dims:int, num_results:int=100) -> list[tuple[int, float]]:
+	def search_embedding_bucket(self, embedding:list[float], bucket_id:int, model_dims:int, num_results:int=100) -> list[tuple[int, float]]:
 		self._assert_bucket_id(bucket_id)
 
 		if not self.bucket_is_init(bucket_id):
@@ -310,6 +314,10 @@ class HyCLIP_DB:
 			return [results] if isinstance(results, tuple) else results
 		else:
 			return []
+
+	def search_id_bucket(self, hash_id:int, bucket_id:int, model_dims:int, num_results:int=100) -> list[tuple[int, float]]:
+		search_emb = self.get_embedding(hash_id)
+		return self.search_embedding_bucket(search_emb, bucket_id, model_dims, num_results)
 	
 	def drop_temp_bucket(self, bucket_id):
 		self.DB.execute(f"DROP TABLE IF EXISTS temp_bucket_{bucket_id};")

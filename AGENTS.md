@@ -29,7 +29,7 @@ There is no lint, typecheck, formatter, or CI config — don't invent commands f
 - **Model loads lazily**: eval/search-ingest endpoints return 409 until `/load_model`. `ingest.py` loads then unloads per run. First load downloads from HuggingFace; `model.py:cached_path` loads from the local HF cache offline afterward.
 - **Embedding dims are coupled**: `api.py` passes `model.dims` to search, but `db.py` search methods default to `768` and `test_*.py` hardcode `EMB_DIM = 768`. Changing `CLIP_MODEL` to a model with different dims breaks db tests and the db.py defaults.
 - **`db.py:insert_embedding` does NOT auto-commit** (documented in code). Callers must `db.commit()`.
-- **`db.qe()` return shape varies** (scalar / tuple / list / None depending on result), and callers wrap single tuples into lists (e.g. `search_global`, `get_buckets`). Mind this when using db helpers.
+- **`db.qe()` return shape varies** (scalar / tuple / list / None depending on result), and callers wrap single tuples into lists (e.g. `search_embedding`, `get_buckets`). Mind this when using db helpers.
 - Bucket search materializes `temp_bucket_{id}` tables, dropped at startup by `clean_temp_buckets`; `remove_bucket` drops them too.
 - **Indentation is tabs** everywhere; match it.
 

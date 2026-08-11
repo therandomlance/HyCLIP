@@ -175,6 +175,16 @@ def main():
 	assert bucket_hits, "bucket search returned nothing"
 	assert set(bucket_hits) <= {1, 10, 11}, f"bucket search leaked: {bucket_hits}"
 
+	r = client.post("/search_id", json={"hash_id": 1, "num_results": 2})
+	assert r.status_code == 200
+	assert isinstance(r.json(), list) and len(r.json()) >= 1, "search_id returned nothing"
+
+	r = client.post("/search_id_bucket", json={"hash_id": 1, "bucket_id": bucket_id, "num_results": 5})
+	assert r.status_code == 200
+	assert set(h for h, _ in r.json()) <= {1, 10, 11}, "search_id_bucket leaked"
+
+	assert client.post("/search_id", json={"hash_id": 99999}).status_code == 404
+
 	# ---- delete ----
 	r = client.post("/delete_hash", params={"hash_id": 12})
 	assert r.status_code == 200 and r.json()["deleted"] is True
