@@ -41,15 +41,15 @@ Config lives in `config.json`, generated on first run. Config can be updated and
 
 Key options:
 
-| Key | Purpose |
-| --- | --- |
-| `API_URL` | Hydrus client API URL (default `http://localhost:45869`) |
-| `API_KEY` | Hydrus API key (needed for the proxy endpoints) |
-| `TAG_SERVICE_KEY` | Hydrus tag service key (needed for `ingest_enqueue`) |
-| `HYCLIP_API_URL` | URL the server binds to (default `http://localhost:8000`) |
-| `CLIP_MODEL` | open_clip model name (default `ViT-B-16-SigLIP2`) |
-| `LOAD_MODEL_ON_STARTUP` | Load the model when the server starts |
-| `VECTOR_QUANT` | Vector storage quantization (e.g. `UINT8`) |
+| Key                     | Purpose                                                                                                  |
+| -------------------------| ----------------------------------------------------------------------------------------------------------|
+| `API_URL`               | Hydrus client API URL (default `http://localhost:45869`)                                                 |
+| `API_KEY`               | Hydrus API key (needed for the proxy endpoints)                                                          |
+| `TAG_SERVICE_KEY`       | Hydrus tag service key (needed for `ingest_enqueue`)                                                     |
+| `HYCLIP_API_URL`        | URL the server binds to (default `http://localhost:8000`)                                                |
+| `CLIP_MODEL`            | open_clip model name (default `ViT-B-16-SigLIP2`)                                                        |
+| `LOAD_MODEL_ON_STARTUP` | Load the model when the server starts                                                                    |
+| `VECTOR_QUANT`          | Vector storage [quantization](https://github.com/sqliteai/sqlite-vector/blob/main/API.md) (e.g. `UINT8`) |
 
 ## Ingesting from Hydrus
 
