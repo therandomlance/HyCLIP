@@ -11,6 +11,7 @@ from pydantic import BaseModel
 class IngestEnqueueRequest(BaseModel):
 	tag: str = "hyclip:ingest"
 	max_evaluate: int | None = None
+	remove_tag: bool = True
 
 class AddHashesToBucketRequest(BaseModel):
 	bucket_id: int
@@ -117,7 +118,7 @@ def build_router():
 
 	@router.post("/ingest_enqueue")
 	def ingest_enqueue(req: IngestEnqueueRequest):
-		"""Find hydrus files tagged `tag`, load them into the ingest queue, and remove the tag."""
+		"""Find hydrus files tagged `tag` and load them into the ingest queue. Removes the tag when remove_tag is set."""
 		# TODO slim this down as much as I can
 		if not api.config.TAG_SERVICE_KEY:
 			raise HTTPException(status_code=503, detail="TAG_SERVICE_KEY not configured")
@@ -142,10 +143,11 @@ def build_router():
 
 		if to_enqueue:
 			api.db.enqueue_hashes(to_enqueue)
-			hydrus.add_tags(
-				file_ids=[fid for fid, _ in to_enqueue],
-				service_keys_to_actions_to_tags={api.config.TAG_SERVICE_KEY: {TagAction.DELETE: [req.tag]}},
-			)
+			if req.remove_tag:
+				hydrus.add_tags(
+					file_ids=[fid for fid, _ in to_enqueue],
+					service_keys_to_actions_to_tags={api.config.TAG_SERVICE_KEY: {TagAction.DELETE: [req.tag]}},
+				)
 		return {"found": found, "enqueued": len(to_enqueue), "skipped": skipped}
 
 	@router.post("/add_hashes_to_bucket")
