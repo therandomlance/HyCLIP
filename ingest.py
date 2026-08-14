@@ -47,106 +47,116 @@ class Timer():
 		sys.stdout.write(f"\r\x1b[K{progress}")
 		sys.stdout.flush()
 
-def main():
-	parser = argparse.ArgumentParser(
-		description="Bypass the HyCLIP/Hydrus API to ingest your entire library as fast as possible"
-	)
-	parser.add_argument("db_location", type=str, help="Path to the hydrus db files")
-	parser.add_argument("folder", type=str, help="Folder to scan")
-	parser.add_argument("--max-eval", type=int, default=-1, help="max images to scan in one run")
+	def finished(self) -> bool:
+		return True if MAX_EVAL != -1 and self.ingested >= MAX_EVAL else False
 
-	args = parser.parse_args()
-	
-	DB_PATH = args.db_location
-	HY = HyDB(DB_PATH)
+def _ingest_folder(folder:str):
+	items = os.listdir(folder)
 
-	CFG = HyCLIP_Config()
-	MODEL = HyCLIP_Model(CFG.CLIP_MODEL)
-	DB = HyCLIP_DB(MODEL.dims, CFG.VECTOR_QUANT)
-	
-	MODEL.load_model()
+	# Folders in client_files are either all subfolders or all files, no mixing
+	if os.path.isdir(os.path.join(folder, items[0])):
+		for subfolder in items:
+			_ingest_folder(os.path.join(folder, subfolder))
 
-	FOLDER = args.folder
-	MAX_EVAL = args.max_eval
+			if T.finished():
+				T.print_prog()
+				return
 
-	N = 0
-	finished = False
-	T = Timer()
+		# Once all subfolders are finished, return
+		return
 
-	# TODO this could get pretty fat for very thick DBs
-	existing = set(DB.get_all_hash_ids())
+	# Moving to file handling if folders not present
 
-	for subfolder in os.listdir(FOLDER):
-		if finished:
-			break
+	# Skipping past invalid filetypes
+	# list of (hash, path)
+	valid_hashes = []
+	for file in items:
+		F = Path(file)
 
-		subfolder_path = os.path.join(FOLDER, subfolder)
-		files = os.listdir(subfolder_path)
+		if not MODEL.check_filetype(file):
+			T.skipped_filetype += 1
+			continue
 
-		# Skipping past invalid filetypes
-		# list of (hash, path)
-		valid_hashes = []
-		for file in files:
-			F = Path(file)
+		filepath = os.path.join(folder, file)
+		valid_hashes.append((F.stem, filepath))
 
-			if not MODEL.check_filetype(file):
-				T.skipped_filetype += 1
+	hash_batches = split_into_batches(valid_hashes, CFG.INGEST_BATCH_SIZE)
+
+	for batch in hash_batches:		
+		hashes, filepaths = zip(*batch)
+		hash_ids = HY.get_hash_id_batch(hashes)
+
+		# Check for existing hash_ids and unknown hashes
+		to_eval = []
+		for _hash, filepath in batch:
+			hash_id = hash_ids[_hash]
+			
+			if hash_id is None:
+				continue
+			if hash_id in EXISTING:
+				T.skipped_exists += 1
+				# Print progress less often when loop is hot
+				if T.skipped_exists % 2000 == 0:
+					T.print_prog()
+				continue
+			to_eval.append((hash_id, filepath))
+		
+		# Batch embedding
+		embeddings = MODEL.eval_image_batch([F for _, F in to_eval], CFG.EVAL_WORKERS)
+		
+		# Removing failed embeddings and inserting into db
+		for (hash_id, _), embedding in zip(to_eval, embeddings):
+			if embedding is None:
+				T.failed += 1
 				continue
 
-			filepath = os.path.join(subfolder_path, file)
-			valid_hashes.append((F.stem, filepath))
+			DB.insert_embedding(hash_id, embedding)
+			T.ingested += 1
 
-
-		hash_batches = split_into_batches(valid_hashes, CFG.INGEST_BATCH_SIZE)
-
-		for batch in hash_batches:
-			if finished:
-				break 
-			
-			hashes, filepaths = zip(*batch)
-			hash_ids = HY.get_hash_id_batch(hashes)
-
-			# Check for existing hash_ids and unknown hashes
-			to_eval = []
-			for _hash, filepath in batch:
-				hash_id = hash_ids[_hash]
-				
-				if hash_id is None:
-					continue
-				if hash_id in existing:
-					T.skipped_exists += 1
-					# Print progress less often when loop is hot
-					if T.skipped_exists % 2000 == 0:
-						T.print_prog()
-					continue
-				to_eval.append((hash_id, filepath))
-			
-			# Batch embedding
-			embeddings = MODEL.eval_image_batch([F for _, F in to_eval], CFG.EVAL_WORKERS)
-			
-			# Removing failed embeddings and inserting into db
-			for (hash_id, _), embedding in zip(to_eval, embeddings):
-				if embedding is None:
-					T.failed += 1
-					continue
-
-				DB.insert_embedding(hash_id, embedding)
-				T.ingested += 1
-
-				if MAX_EVAL != -1 and T.ingested >= MAX_EVAL:
-					finished = True 
-					break
-
-			# Print Progress each time a non-trivial batch is completed
-			if len(to_eval) > 0:
+			if T.finished():
 				T.print_prog()
+				return
 
-			DB.commit()
+		# Print Progress each time a non-trivial batch is completed
+		if len(to_eval) > 0:
+			T.print_prog()
 
-	DB.commit()
+		DB.commit()
 
 def split_into_batches(items:list, batch_size:int):
 	return [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
 
-if __name__ == "__main__":
-	main()
+parser = argparse.ArgumentParser(
+	description="Bypass the HyCLIP/Hydrus API to ingest your entire library as fast as possible"
+)
+parser.add_argument("db_location", type=str, help="Path to the hydrus db files")
+parser.add_argument("folder", type=str, help="Folder to scan")
+parser.add_argument("--max-eval", type=int, default=-1, help="max images to scan in one run")
+
+args = parser.parse_args()
+
+DB_PATH = args.db_location
+HY = HyDB(DB_PATH)
+
+
+CFG = HyCLIP_Config()
+MODEL = HyCLIP_Model(CFG.CLIP_MODEL)
+DB = HyCLIP_DB(MODEL.dims, CFG.VECTOR_QUANT)
+
+MODEL.load_model()
+
+TOP_DIR = args.folder
+MAX_EVAL = args.max_eval
+
+N = 0
+T = Timer()
+
+# TODO this could get pretty fat for very thick DBs
+EXISTING = set(DB.get_all_hash_ids())
+
+_ingest_folder(TOP_DIR)
+
+DB.commit()
+
+
+
