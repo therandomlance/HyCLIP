@@ -88,7 +88,7 @@ def main():
 	# ---- global search ----
 	db.quant_prepare("embeddings", EMB_DIM, QUANT)
 	assert db.quant_status == "ready", "quant status should be ready after quant_prepare"
-	results = db.search_embedding(make_embedding(0), EMB_DIM, num_results=3)
+	results = db.search_embedding(make_embedding(0), num_results=3)
 	assert db.last_search == "global", "global search should record last_search"
 	assert len(results) == 3, f"expected 3 results, got {len(results)}"
 	dists = [d for _, d in results]
@@ -97,7 +97,7 @@ def main():
 	# ---- bucket search ----
 	db.init_bucket(bucket_id)
 	assert db.bucket_is_init(bucket_id), "bucket should be initialized"
-	bucket_results = db.search_embedding_bucket(make_embedding(1), bucket_id, EMB_DIM, num_results=2)
+	bucket_results = db.search_embedding_bucket(make_embedding(1), bucket_id, num_results=2)
 	assert len(bucket_results) == 2, "bucket search should return requested count"
 	assert all(h in set(hash_ids[:4]) for h, _ in bucket_results), "bucket search returned non-member"
 

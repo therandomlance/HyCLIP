@@ -217,14 +217,14 @@ class HyCLIP_DB:
 
 	def get_bucket_name(self, bucket_id) -> str:
 		self._assert_bucket_id(bucket_id)
-		return self.DB.execute("SELECT bucket_name FROM buckets WHERE bucket_id = ?", [bucket_id])
+		return self.qe("SELECT bucket_name FROM buckets WHERE bucket_id = ?", [bucket_id])
 
 	def get_buckets(self):
 		return self.DB.execute("SELECT * FROM buckets").fetchall()
 
 	def get_bucket_size(self, bucket_id:int) -> int:
 		self._assert_bucket_id(bucket_id)
-		return self.DB.execute("SELECT COUNT(*) FROM bucket_members WHERE bucket_id = ?", [bucket_id])
+		return self.qe("SELECT COUNT(*) FROM bucket_members WHERE bucket_id = ?", [bucket_id])
 
 	# ===== Data Removal =====
 	def remove_embedding(self, hash_id:int):
@@ -280,10 +280,10 @@ class HyCLIP_DB:
 			ORDER BY v.distance
 			LIMIT ?
 		'''
-		A = [str(embedding), limit]
+		A = [str(embedding), num_results]
 		return self.DB.execute(Q, A).fetchall()
 
-	def _search_quantize_scan(self, embedding:list[float], num_results:int, table_name:str=embeddings):
+	def _search_quantize_scan(self, embedding:list[float], num_results:int, table_name:str="embeddings"):
 		Q = f'''
 			SELECT hash_id, v.distance
 			FROM vector_quantize_scan('{table_name}', 'embedding', vector_as_f32( ? )) as v
@@ -307,7 +307,7 @@ class HyCLIP_DB:
 
 	def search_id(self, hash_id:int, num_results:int=100) -> list[tuple[int, float]]:
 		search_emb = self.get_embedding(hash_id)
-		return self.search_embedding(search_emb, model_dims, num_results)
+		return self.search_embedding(search_emb, num_results)
 
 	def search_embedding_bucket(self, embedding:list[float], bucket_id:int, num_results:int=100) -> list[tuple[int, float]]:
 		self._assert_bucket_id(bucket_id)
@@ -329,10 +329,10 @@ class HyCLIP_DB:
 
 	def search_id_bucket(self, hash_id:int, bucket_id:int, num_results:int=100) -> list[tuple[int, float]]:
 		search_emb = self.get_embedding(hash_id)
-		return self.search_embedding_bucket(search_emb, bucket_id, model_dims, num_results)
+		return self.search_embedding_bucket(search_emb, bucket_id, num_results)
 	
 	def search_tags(self, embedding:list[float], limit:int=100) -> list[tuple[str, float]]:
-		return _search_full_scan(embedding, limit, "tags")
+		return self._search_full_scan(embedding, limit, "tags")
 
 	# ===== Bucket Search Cache Management =====
 	def init_bucket(self, bucket_id:int):

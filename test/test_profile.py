@@ -32,7 +32,7 @@ def main():
 	assert n, "no embeddings in hyclip.db — run ingest.py first"
 
 	first_start = time.perf_counter()
-	db.search_id(db.random_hash_ids(1)[0], EMB_DIM, num_results=NUM_RESULTS)
+	db.search_id(db.random_hash_ids(1)[0], num_results=NUM_RESULTS)
 	first_elapsed = time.perf_counter() - first_start
 
 	ids = db.random_hash_ids(N_SEARCHES)
@@ -41,7 +41,7 @@ def main():
 	times = []
 	for hash_id in ids:
 		start = time.perf_counter()
-		results = db.search_id(hash_id, EMB_DIM, num_results=NUM_RESULTS)
+		results = db.search_id(hash_id, num_results=NUM_RESULTS)
 		times.append(time.perf_counter() - start)
 		assert len(results) == NUM_RESULTS
 

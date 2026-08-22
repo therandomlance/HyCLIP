@@ -310,22 +310,22 @@ def db_status():
 
 @app.post("/search")
 def search(req: SearchRequest):
-	return db.search_embedding(req.embedding, model.dims, req.num_results)
+	return db.search_embedding(req.embedding, req.num_results)
 
 @app.post("/search_id")
 def search_id(req: SearchIDRequest):
 	_assert_hash_id(req.hash_id)
-	return db.search_id(req.hash_id, model.dims, req.num_results)
+	return db.search_id(req.hash_id, req.num_results)
 
 @app.post("/search_bucket")
 def search_bucket(req: SearchBucketRequest):
-	return db.search_embedding_bucket(req.embedding, req.bucket_id, model.dims, req.num_results)
+	return db.search_embedding_bucket(req.embedding, req.bucket_id, req.num_results)
 
 @app.post("/search_id_bucket")
 def search_id_bucket(req: SearchIDBucketRequest):
 	_assert_hash_id(req.hash_id)
 	_assert_bucket_id(req.bucket_id)
-	return db.search_id_bucket(req.hash_id, req.bucket_id, model.dims, req.num_results)
+	return db.search_id_bucket(req.hash_id, req.bucket_id, req.num_results)
 
 
 # ===== Config =====
