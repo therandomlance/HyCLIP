@@ -17,6 +17,10 @@ class AddHashesToBucketRequest(BaseModel):
 	bucket_id: int
 	hashes: list[str]
 
+class MakeTagRequest(BaseModel):
+	tag: str
+	search_limit: int = 1000
+
 
 def build_router():
 	# ponytail: read api.db/api.model/api.config at call time so tests that swap
@@ -189,5 +193,44 @@ def build_router():
 		already_queued = len(api.db.get_queued_ids([p["hash_id"] for p in pending]))
 
 		return {"added": len(ingested), "pending": pending, "already_queued": already_queued, "unknown": unknown}
+
+	# ====== Tags ======
+	@router.get("/list_tags")
+	def list_tags():
+		"""All tag centroids currently stored, alphabetical."""
+		return api.db.get_tags()
+
+	@router.get("/get_tag_embedding")
+	def get_tag_embedding(tag: str):
+		"""Fetch a stored tag centroid (for the search tab to fold into the combined vector)."""
+		try:
+			return api.db.get_tag_embedding(tag)
+		except ValueError as e:
+			raise HTTPException(status_code=404, detail=str(e))
+
+	@router.post("/make_tag")
+	def make_tag(req: MakeTagRequest):
+		"""Compute & store the centroid embedding for files hydrus tags with `tag`.
+		Reuses already-ingested embeddings (no model load needed); files not yet
+		ingested are skipped. The client loops one tag per call for progress."""
+		hydrus = _hydrus()
+		try:
+			# random sort so system:limit takes an unbiased sample for the centroid
+			file_ids = hydrus.search_files(
+				tags=[f"system:limit={req.search_limit}", req.tag],
+				file_sort_type=4, return_file_ids=True,
+			).get("file_ids", [])
+		except hydrus_api.APIError as e:
+			raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
+
+		# only files already ingested into HyCLIP have a stored embedding to centroid
+		ingested = [fid for fid in file_ids if api.db.exists_hash_id(fid)]
+		embeddings = api.db.get_embeddings(ingested)
+		centroid = api.db.vec_centroid(embeddings)
+		if centroid is None:
+			raise HTTPException(status_code=422, detail=f'no ingested files match "{req.tag}"')
+		api.db.insert_tag(req.tag, centroid)
+		api.db.commit()
+		return {"tag": req.tag, "matched": len(file_ids), "ingested": len(ingested)}
 
 	return router

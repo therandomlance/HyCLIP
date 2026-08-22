@@ -12,6 +12,7 @@ function normalize(v) {
 // ===== State =====
 const state = {
 	prompts: [],      // {text, weight, positive, enabled, vec, vecFor}
+	tags: [],         // {tag, weight, positive, enabled, vec, vecFor} — vec fetched from /get_tag_embedding
 	refs: [],         // {hashId|null, vec, weight, positive, enabled, label, thumbURL, blobURL}
 	results: [],      // {hashId, dist}
 	selected: new Set(),
@@ -71,6 +72,125 @@ function addPrompt(data = {}) {
 }
 function refreshPromptRemoveButtons() {
 	const rows = $("#prompt-list").children;
+	for (const el of rows) el.querySelector(".remove-btn").style.visibility = rows.length > 1 ? "visible" : "hidden";
+}
+
+// ===== Tag rows + autocomplete =====
+// ponytail: custom fuzzy popup (~40 lines) instead of native <datalist> (no fuzzy
+// match, no popup on focus, browser-dependent UI) or an autocomplete lib —
+// subsequence match, ↑/↓ navigate, Tab fills, click selects.
+let tagList = [];
+async function loadTagList() {
+	try { tagList = await api("/list_tags"); } catch { tagList = []; }
+}
+const fuzzyMatch = (q, t) => {
+	q = q.toLowerCase(); t = t.toLowerCase();
+	let i = 0;
+	for (const c of t) if (i < q.length && c === q[i]) i++;
+	return i === q.length;
+};
+function attachTagAutocomplete(input) {
+	const popup = document.createElement("div");
+	popup.className = "autocomplete-popup";
+	popup.hidden = true;
+	input.parentElement.append(popup);
+	let matches = [];
+	let hi = -1;
+	let suppress = false;
+	const show = () => {
+		popup.replaceChildren();
+		if (!matches.length) { popup.hidden = true; return; }
+		matches.forEach((m, i) => {
+			const d = document.createElement("div");
+			d.className = "autocomplete-item" + (i === hi ? " active" : "");
+			d.textContent = m;
+			d.onmousedown = (e) => { e.preventDefault(); select(i); };
+			popup.append(d);
+		});
+		popup.hidden = false;
+	};
+	const select = (i) => {
+		if (i < 0 || i >= matches.length) return;
+		input.value = matches[i];
+		suppress = true;
+		input.dispatchEvent(new Event("input"));
+		suppress = false;
+		popup.hidden = true;
+	};
+	input.addEventListener("input", () => {
+		if (suppress) return;
+		const q = input.value.trim();
+		if (!q) { popup.hidden = true; return; }
+		matches = tagList.filter((t) => fuzzyMatch(q, t)).slice(0, 10);
+		hi = matches.length ? 0 : -1;
+		show();
+	});
+	input.addEventListener("focus", () => { if (input.value.trim()) input.dispatchEvent(new Event("input")); });
+	input.addEventListener("blur", () => { setTimeout(() => { popup.hidden = true; }, 150); });
+	input.addEventListener("keydown", (e) => {
+		if (popup.hidden || !matches.length) return;
+		if (e.key === "ArrowDown") { e.preventDefault(); hi = (hi + 1) % matches.length; show(); }
+		else if (e.key === "ArrowUp") { e.preventDefault(); hi = (hi - 1 + matches.length) % matches.length; show(); }
+		else if (e.key === "Tab") { e.preventDefault(); select(hi); }
+		else if (e.key === "Escape") { popup.hidden = true; }
+	});
+}
+
+function addTag(data = {}) {
+	const row = {
+		tag: data.tag ?? "", weight: data.weight ?? 1.0,
+		positive: data.positive ?? true, enabled: data.enabled ?? true,
+		vec: null, vecFor: null,
+	};
+	state.tags.push(row);
+
+	const el = document.createElement("div");
+	el.className = "term-row" + (row.enabled ? "" : " disabled");
+
+	const chk = document.createElement("input");
+	chk.type = "checkbox"; chk.checked = row.enabled; chk.className = "enable-check";
+	chk.title = "Enable / disable";
+	chk.onchange = () => { row.enabled = chk.checked; el.classList.toggle("disabled", !chk.checked); refreshHasInput(); };
+
+	const text = document.createElement("input");
+	text.type = "text"; text.placeholder = "Tag…"; text.value = row.tag;
+	text.oninput = () => { row.tag = text.value; row.vec = null; row.vecFor = null; refreshHasInput(); };
+	text.onkeydown = (e) => { if (e.key === "Enter") performSearch(); };
+
+	const wrap = document.createElement("div");
+	wrap.className = "tag-input-wrap";
+	wrap.append(text);
+	attachTagAutocomplete(text);
+
+	const weight = document.createElement("input");
+	weight.type = "number"; weight.min = 0; weight.max = 5; weight.step = 0.25; weight.value = row.weight;
+	weight.title = "Weight";
+	weight.onchange = () => { row.weight = parseFloat(weight.value) || 0; };
+
+	const sign = document.createElement("button");
+	sign.className = "btn sign-btn" + (row.positive ? "" : " neg");
+	sign.textContent = row.positive ? "+" : "−";
+	sign.title = "Positive / negative contribution";
+	sign.onclick = () => {
+		row.positive = !row.positive;
+		sign.textContent = row.positive ? "+" : "−";
+		sign.classList.toggle("neg", !row.positive);
+	};
+
+	const rm = document.createElement("button");
+	rm.className = "btn remove-btn"; rm.textContent = "✕"; rm.title = "Remove";
+	rm.onclick = () => {
+		if (state.tags.length <= 1) return;
+		state.tags.splice(state.tags.indexOf(row), 1);
+		el.remove(); refreshTagRemoveButtons(); refreshHasInput();
+	};
+
+	el.append(chk, wrap, weight, sign, rm);
+	$("#tag-list").append(el);
+	refreshTagRemoveButtons();
+}
+function refreshTagRemoveButtons() {
+	const rows = $("#tag-list").children;
 	for (const el of rows) el.querySelector(".remove-btn").style.visibility = rows.length > 1 ? "visible" : "hidden";
 }
 
@@ -193,7 +313,9 @@ async function addRefById(hashId) {
 
 // ===== Search =====
 function refreshHasInput() {
-	hyclip.hasInput = state.prompts.some((p) => p.enabled && p.text.trim()) || state.refs.some((r) => r.enabled);
+	hyclip.hasInput = state.prompts.some((p) => p.enabled && p.text.trim())
+		|| state.tags.some((t) => t.enabled && t.tag.trim())
+		|| state.refs.some((r) => r.enabled);
 	updateRequires();
 }
 
@@ -207,9 +329,25 @@ async function resolvePromptVectors() {
 	}
 }
 
+async function resolveTagVectors() {
+	for (const t of state.tags) {
+		if (!t.enabled || !t.tag.trim()) continue;
+		if (t.vec && t.vecFor === t.tag) continue;
+		status(`Resolving tag "${t.tag}"…`);
+		try {
+			t.vec = await api(`/get_tag_embedding?tag=${encodeURIComponent(t.tag)}`);
+			t.vecFor = t.tag;
+		} catch (e) {
+			t.vec = null; t.vecFor = null;
+			status(`Tag "${t.tag}" not stored — generate it on the Tags page first`);
+		}
+	}
+}
+
 function combineVectors() {
 	const terms = [
 		...state.prompts.filter((p) => p.enabled && p.text.trim() && p.vec),
+		...state.tags.filter((t) => t.enabled && t.tag.trim() && t.vec),
 		...state.refs.filter((r) => r.enabled && r.vec),
 	];
 	let sum = null;
@@ -230,6 +368,7 @@ async function performSearch() {
 	status("Searching…");
 	try {
 		await resolvePromptVectors();
+		await resolveTagVectors();
 		const vec = combineVectors();
 		if (!vec) { displayResults([]); status("Search terms cancelled out (zero vector) — adjust weights/signs"); return; }
 
@@ -438,6 +577,7 @@ async function init() {
 	const cfg = await api("/get_config").catch(() => ({}));
 
 	addPrompt();
+	addTag();
 	$("#count-input").value = cfg.SEARCH_LIMIT ?? 100;
 	$("#thumb-size").value = cfg.THUMB_SIZE ?? 300;
 	$("#grid").classList.toggle("fit", $("#fit-select").value === "fit");
@@ -451,6 +591,7 @@ async function init() {
 	const saveCfg = (updates) => post("/update_config", { updates }).catch((e) => status(`Config: ${e.message}`));
 
 	$("#add-prompt").onclick = () => { addPrompt(); };
+	$("#add-tag").onclick = () => { addTag(); };
 	$("#search-btn").onclick = performSearch;
 	$("#clear-btn").onclick = () => {
 		hideHoverPreview();
@@ -459,7 +600,10 @@ async function init() {
 		$("#ref-list").replaceChildren();
 		$("#prompt-list").replaceChildren();
 		state.prompts = [];
+		state.tags = [];
+		$("#tag-list").replaceChildren();
 		addPrompt();
+		addTag();
 		displayResults([]);
 		refreshHasInput();
 		status("Cleared");
@@ -546,6 +690,7 @@ async function init() {
 	});
 
 	refreshBuckets().catch((e) => status(`Buckets: ${e.message}`));
+	loadTagList().catch(() => {});
 }
 
 init();

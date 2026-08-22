@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HyCLIP — Tags</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="topbar"></header>
+
+<main class="page wide">
+	<div class="cols">
+
+		<section class="panel">
+			<h2>Generate tag centroids</h2>
+			<textarea id="tag-input" rows="12" placeholder="One tag per line&#10;e.g. rating:safe&#10;     character:samus aran"></textarea>
+			<div class="row">
+				<label for="limit-input">Images per tag</label>
+				<input type="number" id="limit-input" min="1" value="1000">
+			</div>
+			<div class="row">
+				<button id="start-btn" class="btn primary" data-requires="hydrus">Generate</button>
+				<button id="stop-btn" class="btn" hidden>Stop</button>
+			</div>
+			<progress id="tag-progress" value="0" max="1"></progress>
+			<div id="tag-step" class="hint"></div>
+			<div id="tag-counts" class="hint"></div>
+			<p class="hint">Each tag searches hydrus (limit N, random sample), centroids the already-ingested embeddings, and stores it. No model load needed.</p>
+		<p class="hint">NOTE: Using tag embeddings works best for character, series, creator, or other namespaced tags that the generalized CLIP training data may not contain</p>
+		</section>
+
+		<section class="panel">
+			<h2>Stored tags</h2>
+			<div class="row">
+				<button id="refresh-tags" class="btn small">Refresh</button>
+			</div>
+			<div id="tag-list" class="scroll-pane"><p class="hint">Click Refresh to load stored tags.</p></div>
+		</section>
+
+	</div>
+</main>
+
+<footer id="statusbar">Ready</footer>
+
+<script src="shared.js"></script>
+<script src="tags.js"></script>
+</body>
+</html>

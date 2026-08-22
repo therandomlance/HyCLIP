@@ -28,6 +28,7 @@ const PAGES = [
 	["index.html", "Search"],
 	["buckets.html", "Buckets"],
 	["ingest.html", "Ingest"],
+	["tags.html", "Tags"],
 	["config.html", "Config"],
 ];
 

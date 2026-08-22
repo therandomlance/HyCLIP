@@ -77,6 +77,9 @@ main.page {
 	width: 100%;
 	margin: 0 auto;
 }
+main.page.wide { max-width: 1100px; }
+.cols { display: flex; gap: 10px; flex-wrap: wrap; }
+.cols > .panel { flex: 1; min-width: 280px; }
 main.page textarea {
 	width: 100%;
 	margin-top: 6px;
@@ -218,6 +221,27 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .sign-btn.neg { color: var(--danger); border-color: var(--danger); }
 .remove-btn { width: 28px; flex: none; color: var(--text-dim); }
 .remove-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+/* ===== Tag autocomplete (search sidebar) ===== */
+.tag-input-wrap { flex: 1; min-width: 0; position: relative; display: flex; }
+.autocomplete-popup {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	background: var(--bg-panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	max-height: 200px;
+	overflow-y: auto;
+	z-index: 20;
+	box-shadow: 0 6px 24px rgba(0,0,0,.5);
+}
+.autocomplete-item { padding: 5px 8px; cursor: pointer; font-size: 12px; }
+.autocomplete-item:hover, .autocomplete-item.active { background: var(--accent-dim); }
+
+/* ===== Scroll pane (tags page stored list) ===== */
+.scroll-pane { max-height: 60vh; overflow-y: auto; }
 
 .ref-item img {
 	width: 48px; height: 48px;
