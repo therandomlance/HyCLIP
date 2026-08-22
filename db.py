@@ -138,7 +138,7 @@ class HyCLIP_DB:
 
 	def exists_bucket_member(self, bucket_id:int, hash_id:int) -> bool:
 		Q = "SELECT EXISTS ( SELECT 1 FROM bucket_members WHERE bucket_id = ? AND hash_id = ? )"
-		return bool(self.DB.execute(Q, [bucket_id, hash_id]).fetchall())
+		return bool(self.qe(Q, [bucket_id, hash_id]))
 
 	def is_quantized(self, bucket_id:int|None=None) -> bool:
 		table_name = self.quant_cache_table_name(bucket_id)
@@ -232,7 +232,7 @@ class HyCLIP_DB:
 
 		# Removes from all buckets it's part of
 		for bucket_id in self.get_bucket_membership(hash_id):
-			self.remove_from_bucket(bucket_id, hash_id)
+			self.remove_from_bucket(bucket_id, [hash_id])
 
 		self._delete("embeddings", ("hash_id", hash_id))
 
