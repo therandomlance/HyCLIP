@@ -185,6 +185,25 @@ def main():
 
 	assert client.post("/search_id", json={"hash_id": 99999}).status_code == 404
 
+	# ---- tags ----
+	# /list_tags on an empty tags table -> [] (db.get_tags wraps the polymorphic qe None)
+	assert client.get("/list_tags").json() == [], "list_tags should be [] when empty"
+	# /get_tag_embedding for a missing tag -> 404 (db._assert_tag raises ValueError)
+	assert client.get("/get_tag_embedding", params={"tag": "nope"}).status_code == 404, "missing tag should 404"
+
+	# insert a tag centroid directly; the full /make_tag flow needs a live hydrus,
+	# which the test forces offline (see the /ingest_enqueue 503 assertion above)
+	cent = api.db.get_embedding(1)
+	api.db.insert_tag("species:lopunny", cent)
+	api.db.commit()
+
+	tags = client.get("/list_tags").json()
+	assert tags == ["species:lopunny"], f"list_tags wrong: {tags}"
+	tag_vec = client.get("/get_tag_embedding", params={"tag": "species:lopunny"}).json()
+	assert isinstance(tag_vec, list) and len(tag_vec) == EMB_DIM, "tag embedding dim mismatch"
+	# /make_tag needs hydrus -> 503 without API_KEY (same gate as /ingest_enqueue)
+	assert client.post("/make_tag", json={"tag": "species:lopunny", "search_limit": 10}).status_code == 503, "make_tag should 503 without API_KEY"
+
 	# ---- delete ----
 	r = client.post("/delete_hash", params={"hash_id": 12})
 	assert r.status_code == 200 and r.json()["deleted"] is True

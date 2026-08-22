@@ -101,6 +101,35 @@ def main():
 	assert len(bucket_results) == 2, "bucket search should return requested count"
 	assert all(h in set(hash_ids[:4]) for h, _ in bucket_results), "bucket search returned non-member"
 
+	# ---- tags ----
+	assert db.vec_centroid([]) is None, "vec_centroid([]) should return None, not crash"
+	cent = db.vec_centroid([make_embedding(0), make_embedding(1)])
+	assert len(cent) == EMB_DIM, "centroid dim mismatch"
+
+	assert not db.exists_tag("species:lopunny")
+	db.insert_tag("species:lopunny", make_embedding(0))
+	db.commit()
+	assert db.exists_tag("species:lopunny")
+	stored0 = db.get_tag_embedding("species:lopunny")
+	assert len(stored0) == EMB_DIM, "tag embedding dim mismatch"
+
+	# INSERT OR REPLACE updates in place; the stored value must change
+	db.insert_tag("species:lopunny", make_embedding(1))
+	db.commit()
+	stored1 = db.get_tag_embedding("species:lopunny")
+	assert stored0 != stored1, "insert_tag should replace the stored embedding"
+
+	db.insert_tag("species:gardevoir", make_embedding(2))
+	db.commit()
+	tags = db.get_tags()
+	assert isinstance(tags, list) and set(tags) == {"species:gardevoir", "species:lopunny"}, f"get_tags wrong: {tags}"
+
+	# search_tags: linear scan ordered by distance; the query vector's own tag is nearest
+	hits = db.search_tags(make_embedding(1), limit=10)
+	assert hits and hits[0][0] == "species:lopunny", f"nearest tag wrong: {hits}"
+	assert [d for _, d in hits] == sorted(d for _, d in hits), "search_tags not ordered by distance"
+	assert len(db.search_tags(make_embedding(1), limit=1)) == 1, "limit not respected"
+
 	# ---- queue ----
 	db.enqueue_hashes([(hash_ids[0], str(images[0])), (hash_ids[1], str(images[1]))])
 	assert db.get_num_queue() == 2, "queue count mismatch"
