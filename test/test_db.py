@@ -64,6 +64,10 @@ def main():
 	assert db.exists_hash_id(hash_ids[0])
 	assert not db.exists_hash_id(99999), "ghost hash_id should not exist"
 
+	embeds = db.get_embeddings(hash_ids[:2])
+	assert len(embeds) == 2 and all(len(e) == EMB_DIM for e in embeds), "get_embeddings dim mismatch"
+	assert set(db.get_all_hash_ids()) == set(hash_ids), "get_all_hash_ids wrong"
+
 	# ---- buckets ----
 	bucket_id = db.new_bucket("test-bucket")
 	assert isinstance(bucket_id, int), "new_bucket should return bucket_id"
@@ -85,6 +89,12 @@ def main():
 	assert len(members) == 4, "wrong member count"
 	assert set(members) == set(hash_ids[:4]), "members don't match"
 
+	# rename + list buckets
+	db.rename_bucket(bucket_id, "renamed")
+	assert db.get_bucket_name(bucket_id) == "renamed", "rename_bucket didn't stick"
+	assert db.get_buckets() == [(bucket_id, "renamed")], "get_buckets wrong"
+	db.rename_bucket(bucket_id, "test-bucket")
+
 	# ---- global search ----
 	db.quant_prepare("embeddings", EMB_DIM, QUANT)
 	assert db.quant_status == "ready", "quant status should be ready after quant_prepare"
@@ -100,6 +110,14 @@ def main():
 	bucket_results = db.search_embedding_bucket(make_embedding(1), bucket_id, num_results=2)
 	assert len(bucket_results) == 2, "bucket search should return requested count"
 	assert all(h in set(hash_ids[:4]) for h, _ in bucket_results), "bucket search returned non-member"
+
+	# remove_from_bucket: only removes existing members; syncs the temp table; forces re-quant
+	db.remove_from_bucket(bucket_id, [1, 99999])
+	assert db.get_bucket_size(bucket_id) == 3, "remove_from_bucket wrong size"
+	assert set(db.get_bucket_members(bucket_id)) == set(hash_ids[1:4]), "remove_from_bucket removed wrong members"
+	assert not db.exists_bucket_member(bucket_id, 99999), "non-member should be skipped"
+	assert db.quant_status == "needs_quant", "removing from the active bucket should force re-quant"
+	assert db.qe(f"SELECT COUNT(*) FROM temp_bucket_{bucket_id}") == 3, "temp bucket should sync removals"
 
 	# ---- tags ----
 	assert db.vec_centroid([]) is None, "vec_centroid([]) should return None, not crash"
@@ -136,10 +154,22 @@ def main():
 	assert db.get_queued_ids([hash_ids[0], 99999]) == {hash_ids[0]}, "queue membership check wrong"
 	assert db.get_queued_ids([]) == set(), "empty lookup should be empty set"
 
+	assert db.get_next_queue(1) == (hash_ids[0], str(images[0])), "get_next_queue wrong head"
+	db.dequeue_hashes([hash_ids[0]])
+	assert db.get_num_queue() == 1, "dequeue should remove one hash"
+	assert db.get_next_queue(2) == (hash_ids[1], str(images[1])), "get_next_queue after dequeue"
+
 	# ---- removal ----
+	# remove_embedding on a hash that IS in a bucket tears down its membership + temp table
+	db.add_to_bucket(bucket_id, [hash_ids[4]])
+	db.remove_embedding(hash_ids[4])
+	assert not db.exists_hash_id(hash_ids[4]), "embedding should be removed"
+	assert db.get_bucket_membership(hash_ids[4]) == [], "removed hash should leave its bucket"
+	assert db.get_bucket_size(bucket_id) == 3, "bucket should shed removed member"
+
 	db.remove_embedding(hash_ids[-1])
 	assert not db.exists_hash_id(hash_ids[-1]), "embedding should be removed"
-	assert db.get_num_embeddings() == len(images) - 1, "count after removal wrong"
+	assert db.get_num_embeddings() == len(images) - 2, "count after removal wrong"
 	assert db.get_bucket_membership(hash_ids[-1]) == [], "removed hash should have no bucket memberships"
 
 	db.remove_bucket(bucket_id)
