@@ -33,7 +33,15 @@ class HyCLIP_DB:
 			CREATE TABLE IF NOT EXISTS temp_embedding_queue (
 				hash_id INTEGER PRIMARY KEY,
 				path TEXT UNIQUE
-			)
+			);
+
+			CREATE TABLE IF NOT EXISTS tags (
+				tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
+				tag TEXT UNIQUE,
+				embedding BLOB
+			);
+
+			CREATE INDEX IF NOT EXISTS tag_index ON tags(tag);
 		''')
 		self.commit()
 
@@ -92,6 +100,13 @@ class HyCLIP_DB:
 	def _delete(self, table:str, value:tuple[str, str]):
 		self.DB.execute(f"DELETE FROM {table} WHERE {value[0]} = ? ", [value[1]])
 
+	def vec_centroid(self, vecs:list[list[float]]) -> list[float]:
+		"""Helper function to get the centroid of a list of embeddings"""
+		# TODO numpy is probably faster but I've gotten this far without it so fuck it we ball 
+		N = len(vecs)
+		return [sum(col) / N for col in zip(*vecs)]
+
+
 	# ===== Value Checks =====
 	def _assert_hash_id(self, hash_id:int):
 		if not self.exists_hash_id(hash_id):
@@ -101,12 +116,16 @@ class HyCLIP_DB:
 		if not self.exists_bucket(bucket_id):
 			raise ValueError(f"bucket_id does not exist: {bucket_id}")
 
+	def _assert_tag(self, tag:str):
+		if not self.exists_tag(tag):
+			raise ValueError(f"tag does not exist: {tag}")
+
 	# ===== Embeddings =====
 	def insert_embedding(self, hash_id:int, embedding:list[float]):
 		# IMPORTANT: DOES NOT AUTO-COMMIT
 		# OR IGNORE: a client can abort mid-batch and re-pull the same rows while the
 		# server finishes the old one — duplicate inserts are identical anyway
-		Q = f"INSERT OR IGNORE INTO embeddings (hash_id, embedding) VALUES ( ?, vector_as_f32(?) )"
+		Q = f"INSERT OR IGNORE INTO embeddings (hash_id, embedding) VALUES ( ?,  )"
 		A = [hash_id, str(embedding)]
 		self.DB.execute(Q, A)
 	
@@ -435,3 +454,33 @@ class HyCLIP_DB:
 		marks = ",".join("?" * len(hash_ids))
 		rows = self.DB.execute(f"SELECT hash_id FROM temp_embedding_queue WHERE hash_id IN ({marks})", hash_ids).fetchall()
 		return {r[0] for r in rows}
+
+	# ====== Tags ======
+	def insert_tag(self, tag:str, embedding:list[float]):
+		self.DB.execute("INSERT OR REPLACE INTO tags (tag, embedding) VALUES ( ?, vector_as_f32(?))", (tag, embedding))
+
+	def exists_tag(self, tag:str) -> bool:
+		return self._exists("tags", ("tag", tag))
+
+	def get_tag_embedding(self, tag:str):
+		self._assert_tag(tag)
+		blob = self._get("embedding", "tags", ("tag", tag))
+		embedding = array.array('f')
+		embedding.frombytes(blob)
+		return embedding.tolist()
+
+	def search_tags(self, embedding:list[float], limit:int=100) -> tuple(str, list[float]):
+		# Quantizing not worth it at sub-1m datasets, this is simpler and won't need to track quant status
+		Q = f'''
+			SELECT tag, v.distance
+			FROM vector_quantize_scan('tags', 'embedding', vector_as_f32( ? )) as v
+			INNER JOIN embeddings ON tags.rowid = v.rowid
+			ORDER BY v.distance
+			LIMIT ?
+		'''
+		A = [embedding, limit]
+
+		return self.DB.execute(Q, A).fetchall()
+
+	def get_tags(self) -> list[str]:
+		return self.qe("SELECT tag FROM tags ORDER BY tag ASC")
