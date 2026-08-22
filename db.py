@@ -472,16 +472,18 @@ class HyCLIP_DB:
 		embedding.frombytes(blob)
 		return embedding.tolist()
 
-	def search_tags(self, embedding:list[float], limit:int=100) -> tuple(str, list[float]):
-		# Quantizing not worth it at sub-1m datasets, this is simpler and won't need to track quant status
+	def search_tags(self, embedding:list[float], limit:int=100) -> list[tuple[str, float]]:
+		# vector_full_scan needs vector_init metadata first; no quantize needed for a brute-force scan
+		self.vector_init("tags", self.model_dims)
+		self.commit()
 		Q = f'''
 			SELECT tag, v.distance
 			FROM vector_full_scan('tags', 'embedding', vector_as_f32( ? )) as v
-			INNER JOIN embeddings ON tags.rowid = v.rowid
+			INNER JOIN tags ON tags.rowid = v.rowid
 			ORDER BY v.distance
 			LIMIT ?
 		'''
-		A = [embedding, limit]
+		A = [str(embedding), limit]
 
 		return self.DB.execute(Q, A).fetchall()
 
