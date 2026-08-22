@@ -100,9 +100,11 @@ class HyCLIP_DB:
 	def _delete(self, table:str, value:tuple[str, str]):
 		self.DB.execute(f"DELETE FROM {table} WHERE {value[0]} = ? ", [value[1]])
 
-	def vec_centroid(self, vecs:list[list[float]]) -> list[float]:
+	def vec_centroid(self, vecs:list[list[float]]) -> list[float] | None:
 		"""Helper function to get the centroid of a list of embeddings"""
 		# TODO numpy is probably faster but I've gotten this far without it so fuck it we ball 
+		if not vecs:
+			return None
 		N = len(vecs)
 		return [sum(col) / N for col in zip(*vecs)]
 
@@ -125,7 +127,7 @@ class HyCLIP_DB:
 		# IMPORTANT: DOES NOT AUTO-COMMIT
 		# OR IGNORE: a client can abort mid-batch and re-pull the same rows while the
 		# server finishes the old one — duplicate inserts are identical anyway
-		Q = f"INSERT OR IGNORE INTO embeddings (hash_id, embedding) VALUES ( ?,  )"
+		Q = f"INSERT OR IGNORE INTO embeddings (hash_id, embedding) VALUES ( ?, vector_as_f32(?) )"
 		A = [hash_id, str(embedding)]
 		self.DB.execute(Q, A)
 	
@@ -457,7 +459,8 @@ class HyCLIP_DB:
 
 	# ====== Tags ======
 	def insert_tag(self, tag:str, embedding:list[float]):
-		self.DB.execute("INSERT OR REPLACE INTO tags (tag, embedding) VALUES ( ?, vector_as_f32(?))", (tag, embedding))
+		self.DB.execute("INSERT OR REPLACE INTO tags (tag, embedding) VALUES ( ?, vector_as_f32(?) )", (tag, str(embedding)))
+		self.commit()
 
 	def exists_tag(self, tag:str) -> bool:
 		return self._exists("tags", ("tag", tag))
@@ -473,7 +476,7 @@ class HyCLIP_DB:
 		# Quantizing not worth it at sub-1m datasets, this is simpler and won't need to track quant status
 		Q = f'''
 			SELECT tag, v.distance
-			FROM vector_quantize_scan('tags', 'embedding', vector_as_f32( ? )) as v
+			FROM vector_full_scan('tags', 'embedding', vector_as_f32( ? )) as v
 			INNER JOIN embeddings ON tags.rowid = v.rowid
 			ORDER BY v.distance
 			LIMIT ?
@@ -483,4 +486,7 @@ class HyCLIP_DB:
 		return self.DB.execute(Q, A).fetchall()
 
 	def get_tags(self) -> list[str]:
-		return self.qe("SELECT tag FROM tags ORDER BY tag ASC")
+		tags = self.qe("SELECT tag FROM tags ORDER BY tag ASC")
+		if tags is None:
+			return []
+		return [tags] if isinstance(tags, str) else tags
