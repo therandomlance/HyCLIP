@@ -43,7 +43,7 @@ class Timer():
 
 	def print_prog(self):
 		image_rate = self.ingested / (time.perf_counter()-self.start_time)
-		progress = f"Ingested: {self.ingested} | Skipped (Filetype): {self.skipped_filetype} | Skipped (Exists): {self.skipped_exists} | {str(image_rate)[:5]} img/s "
+		progress = f"Ingested: {self.ingested} | Skipped (Filetype): {self.skipped_filetype} | Skipped (Exists): {self.skipped_exists} | Failed: {self.failed} | {str(image_rate)[:5]} img/s "
 		sys.stdout.write(f"\r\x1b[K{progress}")
 		sys.stdout.flush()
 
@@ -52,6 +52,10 @@ class Timer():
 
 def _ingest_folder(folder:str):
 	items = os.listdir(folder)
+
+	if not items or len(items) == 0:
+		print(f"Folder appears to be empty: {folder}")
+		return
 
 	# Folders in client_files are either all subfolders or all files, no mixing
 	if os.path.isdir(os.path.join(folder, items[0])):
