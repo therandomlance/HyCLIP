@@ -4,7 +4,7 @@ from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
 import concurrent.futures
-from huggingface_hub import snapshot_download
+from huggingface_hub import snapshot_download, hf_hub_download
 
 class HyCLIP_Model():
 	def __init__(self, model_name, verbose:bool=True):
@@ -59,6 +59,9 @@ class HyCLIP_Model():
 			self.model, self.preprocess = open_clip.create_model_from_pretrained(f"local-dir:{path}")
 			self.tokenizer = open_clip.get_tokenizer(f"local-dir:{path}")
 		else:
+			repo = open_clip.pretrained.get_pretrained_cfg(self.model_name, self.PRETRAINED_TAG).get("hf_hub", "").rstrip("/")
+			if repo:
+				hf_hub_download(repo, "open_clip_config.json")
 			self.model, self.preprocess = open_clip.create_model_from_pretrained(self.model_name, pretrained=self.PRETRAINED_TAG)
 			self.tokenizer = open_clip.get_tokenizer(self.model_name)
 
