@@ -71,6 +71,19 @@ class SearchBucketRequest(BaseModel):
 class UpdateConfigRequest(BaseModel):
 	updates: dict
 
+class IngestEnqueueRequest(BaseModel):
+	tag: str = "hyclip:ingest"
+	max_evaluate: int | None = None
+	remove_tag: bool = True
+
+class AddHashesToBucketRequest(BaseModel):
+	bucket_id: int
+	hashes: list[str]
+
+class MakeTagRequest(BaseModel):
+	tag: str
+	search_limit: int = 1000
+
 
 # ===== Helpers =====
 def _assert_model_loaded():
@@ -85,6 +98,27 @@ def _assert_bucket_id(bucket_id:int):
 	if not ORCH.DB.exists_bucket(bucket_id):
 		raise HTTPException(status_code=404, detail=f"bucket_id not found: {bucket_id}")
 
+def _assert_tag(tag:str):
+	if not ORCH.DB.exists_tag(tag)
+		raise HTTPException(status_code=404, detail=f"tag not found: {tag}")
+
+def _assert_hydrus():
+	if not ORCH.CFG.API_KEY:
+		raise HTTPException(status_code=503, detail="hydrus API_KEY not configured")
+	if not ORCH.CFG.API_URL:
+		raise HTTPException(status_code=503, detail="hydrus API_URL not configured")
+
+def _assert_tag_service():
+	if not ORCH.CFG.TAG_SERVICE_KEY:
+		raise HTTPException(status_code=503, detail="TAG_SERVICE_KEY not configured")
+
+def _require_model():
+	if ORCH.MODEL.model is None:
+		raise HTTPException(status_code=409, detail="model not loaded")
+
+def _hydrus_file(r, fallback_type: str):
+	return Response(content=r.content, media_type=r.headers.get("Content-Type", fallback_type))
+
 # ===== Server =====
 @app.get("/")
 def read_root():
@@ -92,8 +126,7 @@ def read_root():
 
 @app.post("/exit")
 def exit():
-	ORCH.MODEL.unload_model()
-	ORCH.DB.commit()
+	ORCH.shutdown()
 	os._exit(0)
 
 
@@ -130,68 +163,18 @@ def eval_text(req: TextRequest):
 @app.post("/ingest_image")
 def ingest_image(req: IngestRequest):
 	_assert_model_loaded()
-
-	hash_id = req.hash_id
-	path = req.path
-	
-	if ORCH.DB.exists_hash_id(hash_id):
-		return {"hash_id": hash_id, "status": "already_ingested"}
-	if not ORCH.MODEL.check_filetype(path):
-		return {"hash_id": hash_id, "status": "skipped"}
+	if not os.path.exists(req.path): 
+		raise HTTPException(status_code=404, detail=f"file not found: {req.path}")
 	try:
-		embedding = ORCH.MODEL.eval_image(path)
-	except FileNotFoundError: 
-		raise HTTPException(status_code=404, detail=f"file not found: {path}")
+		return ORCH.ingest_image(req.hash_id, req.path)
 	except RuntimeError as E:
 		raise HTTPException(status_code=409, detail=E)
-	if embedding is None:
-		return {"hash_id": hash_id, "status": "failed"}
-
-	ORCH.DB.insert_embedding(hash_id, embedding)
-	ORCH.DB.quant_status = "needs_quant"
-	ORCH.DB.commit()
-	ORCH.DB.dequeue_hashes([hash_id])
-
-	return {"hash_id": hash_id, "status": "ingested"}
 
 @app.post("/ingest_image_batch")
 def ingest_image_batch(req: IngestBatchRequest):
 	_assert_model_loaded()
-
-	results = []
-	to_eval = []
-
-	for i, item in enumerate(req.items):
-		if not os.path.exists(item.path):
-			raise HTTPException(status_code=404, detail=f"file not found: {item.path}")
-		if ORCH.DB.exists_hash_id(item.hash_id):
-			results.append({"hash_id": item.hash_id, "status": "already_ingested"})
-			continue
-		if not ORCH.MODEL.check_filetype(item.path):
-			print(f"skipping unsupported filetype: {item.path}")
-			results.append({"hash_id": item.hash_id, "status": "skipped"})
-			continue
-		to_eval.append(i)
-
-	embeddings = ORCH.MODEL.eval_image_batch([req.items[i].path for i in to_eval], ORCH.CFG.EVAL_WORKERS)
-
-	inserts = []
-	for i, embedding in zip(to_eval, embeddings):
-		item = req.items[i]
-		if embedding is None:
-			results.append({"hash_id": item.hash_id, "status": "failed"})
-			continue
-		inserts.append((item.hash_id, embedding))
-		results.append({"hash_id": item.hash_id, "status": "ingested"})
-
-	for hash_id, embedding in inserts:
-		ORCH.DB.insert_embedding(hash_id, embedding)
-
-	ORCH.DB.quant_status = "needs_quant"
-	ORCH.DB.commit()
-	ORCH.DB.dequeue_hashes([hash_id for hash_id, _ in inserts])
-
-	return results
+	pending = [(X.hash_id, X.path) for X in req.items]
+	return ORCH.ingest_image_batch(pending)
 
 
 # ===== Ingest Queue =====
@@ -203,38 +186,7 @@ def queue_status():
 def work_queue(req: ProcessBatchRequest):
 	"""Process one batch from the persistent queue; the caller loops for progress."""
 	_assert_model_loaded()
-
-	batch = ORCH.DB.get_next_queue(req.batch_size or ORCH.CFG.INGEST_BATCH_SIZE) or []
-	if isinstance(batch, tuple):
-		batch = [batch]
-
-	ingested = exists = skipped = errors = 0
-	to_eval = []
-	for hash_id, path in batch:
-		if not os.path.exists(path):
-			errors += 1
-			continue
-		if ORCH.DB.exists_hash_id(hash_id):
-			exists += 1
-			continue
-		if not ORCH.MODEL.check_filetype(path):
-			skipped += 1
-			continue
-		to_eval.append((hash_id, path))
-
-	for hash_id, embedding in zip([h for h, _ in to_eval], ORCH.MODEL.eval_image_batch([p for _, p in to_eval], ORCH.CFG.EVAL_WORKERS)):
-		if embedding is None:
-			errors += 1
-			continue
-		ORCH.DB.insert_embedding(hash_id, embedding)
-		ingested += 1
-
-	ORCH.DB.quant_status = "needs_quant"
-	ORCH.DB.commit()
-	ORCH.DB.dequeue_hashes([fid for fid, _ in batch])
-
-	return {"processed": len(batch), "ingested": ingested, "already_ingested": exists,
-		"skipped": skipped, "errors": errors, "remaining": ORCH.DB.get_num_queue() or 0}
+	return ORCH.work_queue_batch(req.batch_size)
 
 
 # ===== Buckets =====
@@ -335,14 +287,129 @@ def update_config(req: UpdateConfigRequest):
 	unknown = set(req.updates) - set(ORCH.CFG.cfg)
 	if unknown:
 		raise HTTPException(status_code=400, detail=f"unknown config keys: {sorted(unknown)}")
-	for key, value in req.updates.items():
-		setattr(config, key, value)
-	ORCH.CFG.save_config()
-	return ORCH.CFG.cfg
+	return ORCH.update_config(req.updates)
 
 
-# ===== Web UI / Hydrus proxy =====
-app.include_router(build_router())
+# ===== Hydrus API / WebUI =====
+@app.get("/heartbeat")
+def heartbeat():
+	"""All topbar status dots in one call."""
+	return ORCH.heartbeat()
+
+@app.get("/thumbnail")
+def thumbnail(hash_id: int):
+	try:
+		return _hydrus_file(ORCH.HY.get_thumbnail(file_id=hash_id), "image/jpeg")
+	except hydrus_api.APIError as e:
+		raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
+
+@app.get("/file")
+def get_file(hash_id: int):
+	try:
+		return _hydrus_file(ORCH.HY.get_file(file_id=hash_id), "application/octet-stream")
+	except hydrus_api.APIError as e:
+		raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
+
+@app.get("/file_path")
+def get_file_path(hash_id: int):
+	try:
+		return {"path": ORCH.HY.get_file_path(file_id=hash_id)["path"]}
+	except hydrus_api.APIError as e:
+		raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
+
+@app.get("/resolve_hash")
+def resolve_hash(hash: str):
+	"""Resolve a hydrus sha256 hash to a file_id (the db's hash_id)."""
+	# TODO find a way to get the hash in a faster way than this heavy API request
+	meta = ORCH.HY.get_file_metadata(hashes=[hash], only_return_identifiers=True).get("metadata", [])
+	
+	if not meta:
+		raise HTTPException(status_code=404, detail="hash not found in hydrus")
+	
+	file_id = meta[0]["file_id"]
+	return {"hash_id": file_id, "ingested": ORCH.DB.exists_hash_id(file_id)}
+
+@app.post("/eval_image_upload")
+async def eval_image_upload(request: Request, hash_id: int | None = None):
+	# Known hash_id -> reuse the stored embedding instead of re-evaluating
+	if hash_id is not None and ORCH.DB.exists_hash_id(hash_id):
+		return ORCH.DB.get_embedding(hash_id)
+	_require_model()
+	data = await request.body()
+	if not data:
+		raise HTTPException(status_code=400, detail="empty upload")
+	fd, path = tempfile.mkstemp()
+	try:
+		with os.fdopen(fd, "wb") as f:
+			f.write(data)
+		embedding = api.model.eval_image(path)
+	finally:
+		os.unlink(path)
+	if embedding is None:
+		raise HTTPException(status_code=422, detail="could not evaluate image")
+	return embedding
+
+@app.post("/ingest_enqueue")
+def ingest_enqueue(req: IngestEnqueueRequest):
+	_assert_tag_service()
+	return ORCH.enqueue(req.tag, req.max_evaluate, req.remove_tag)
+
+@app.post("/add_hashes_to_bucket")
+def add_hashes_to_bucket(req: AddHashesToBucketRequest):
+	"""Resolve sha256 hashes via hydrus: add ingested ones to the bucket, return the rest for the client to ingest."""
+	# TODO I can probably improve this a lot
+	hashes = [h.strip() for h in req.hashes if h.strip()]
+	if not hashes:
+		return {"added": 0, "pending": [], "already_queued": 0, "unknown": []}
+
+	try:
+		meta = ORCH.HY.get_file_metadata(hashes=hashes, only_return_identifiers=True).get("metadata", [])
+	except hydrus_api.APIError as e:
+		raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
+
+	known = {m["hash"]: m["file_id"] for m in meta if m.get("file_id") is not None}
+	unknown = [h for h in hashes if h not in known]
+
+	# bucket_members requires the embedding to exist; only already-ingested files can be added now
+	try:
+		members = set(ORCH.DB.get_bucket_members(req.bucket_id) or [])
+	except ValueError as e:
+		raise HTTPException(status_code=404, detail=str(e))
+	ingested = [fid for fid in known.values() if ORCH.DB.exists_hash_id(fid) and fid not in members]
+	if ingested:
+		ORCH.DB.add_to_bucket(req.bucket_id, ingested)
+		ORCH.DB.dequeue_hashes(ingested)
+
+	pending = []
+	for fid in known.values():
+		if ORCH.DB.exists_hash_id(fid):
+			continue
+		try:
+			path = ORCH.HY.get_file_path(file_id=fid)["path"]
+		except Exception:
+			continue
+		pending.append({"hash_id": fid, "path": path})
+
+	already_queued = len(ORCH.DB.get_queued_ids([p["hash_id"] for p in pending]))
+
+	return {"added": len(ingested), "pending": pending, "already_queued": already_queued, "unknown": unknown}
+
+# ====== Tags ======
+@app.get("/list_tags")
+def list_tags():
+	"""All tag centroids currently stored, alphabetical."""
+	return ORCH.DB.get_tags()
+
+@app.get("/get_tag_embedding")
+def get_tag_embedding(tag: str):
+	"""Fetch a stored tag centroid (for the search tab to fold into the combined vector)."""
+	_assert_tag(tag)
+	return ORCH.DB.get_tag_embedding(tag)
+
+@app.post("/make_tag")
+def make_tag(req: MakeTagRequest):
+	return ORCH.make_tag(req.tag, req.search_limit)
+
 
 # Mounted last so API routes take precedence
 class NoCacheStaticFiles(StaticFiles):
