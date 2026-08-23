@@ -58,7 +58,7 @@ class Orchestrator():
 
 	# ===== Search =====
 	def search_embedding(self, embedding:list[float], num_results:int=100):
-		return self.DB.search_embedding(req.embedding, req.num_results)
+		return self.DB.search_embedding(embedding, num_results)
 
 	def search_embedding_bucket(self, embedding:list[float], bucket_id:int, num_results:int=100):
 		return self.DB.search_embedding_bucket(embedding, bucket_id, num_results)
