@@ -67,7 +67,7 @@ class Orchestrator():
 		embedding = self.DB.get_embedding(hash_id)
 		return self.search_embedding(embedding, num_results)
 
-	def search_id_bucket(self, hash_id:int, bucket_id:int, num_results:int=100)
+	def search_id_bucket(self, hash_id:int, bucket_id:int, num_results:int=100):
 		embedding = self.DB.get_embedding(hash_id)
 		return self.search_embedding_bucket(embedding, bucket_id, num_results)
 
