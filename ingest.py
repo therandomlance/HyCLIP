@@ -127,10 +127,10 @@ def split_into_batches(items:list, batch_size:int):
 	return [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
 
 parser = argparse.ArgumentParser(
-	description="Bypass the HyCLIP/Hydrus API to ingest your entire library as fast as possible"
+	description="Bypass the HyCLIP/Hydrus API to ingest your entire library faster"
 )
 parser.add_argument("db_location", type=str, help="Path to the hydrus db files")
-parser.add_argument("folder", type=str, help="Folder to scan")
+parser.add_argument("folder", type=str, help="client_files folder to scan")
 parser.add_argument("--max-eval", type=int, default=-1, help="max images to scan in one run")
 
 args = parser.parse_args()
