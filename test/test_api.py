@@ -25,26 +25,26 @@ def get_images(n: int) -> list[Path]:
 
 def main():
 	# Isolate from the real db/config/model so the test never touches them.
-	# All three module singletons (db, config, model) are swapped so that both
-	# the api.py endpoints and the hydrus-router endpoints (which now read
-	# api.db/api.model/api.config at call time) see the test instances.
+	# The orchestrator's three objects are swapped so both the api.py endpoints
+	# and the orchestrator methods (which read ORCH.DB/MODEL/CFG at call time)
+	# see the test instances.
 	if DB_PATH.exists():
 		DB_PATH.unlink()
-	real_db = api.db
+	real_db = api.ORCH.DB
 
-	real_config = api.config
-	api.config = HyCLIP_Config()
-	api.config.config_path = Path(tempfile.mkdtemp(prefix="hyclip_test_config")) / "config.json"
+	real_config = api.ORCH.CFG
+	api.ORCH.CFG = HyCLIP_Config()
+	api.ORCH.CFG.config_path = Path(tempfile.mkdtemp(prefix="hyclip_test_config")) / "config.json"
 	# Force the hydrus proxy offline so the test never reaches a real hydrus,
 	# regardless of what the user's actual config.json contains.
 	for key in ("API_KEY", "TAG_SERVICE_KEY", "RATING_SERVICE_KEY"):
-		setattr(api.config, key, None)
-		api.config.cfg[key] = None
+		setattr(api.ORCH.CFG, key, None)
+		api.ORCH.CFG.cfg[key] = None
 
-	real_model = api.model
-	api.model = HyCLIP_Model(api.config.CLIP_MODEL, verbose=False)
-	EMB_DIM = api.model.dims  # follow the configured model, not a hardcoded dim
-	api.db = HyCLIP_DB(EMB_DIM, api.config.VECTOR_QUANT, str(DB_PATH), verbose=False)
+	real_model = api.ORCH.MODEL
+	api.ORCH.MODEL = HyCLIP_Model(api.ORCH.CFG.CLIP_MODEL, verbose=False)
+	EMB_DIM = api.ORCH.MODEL.dims  # follow the configured model, not a hardcoded dim
+	api.ORCH.DB = HyCLIP_DB(EMB_DIM, api.ORCH.CFG.VECTOR_QUANT, str(DB_PATH), verbose=False)
 
 	client = TestClient(api.app)
 
@@ -113,7 +113,7 @@ def main():
 	try:
 		r = client.post("/ingest_image", json={"hash_id": 3, "path": str(gif_path)})
 		assert r.status_code == 200 and r.json()["status"] == "skipped", "wrong filetype should be skipped"
-		assert not api.db.exists_hash_id(3), "skipped image should not be inserted"
+		assert not api.ORCH.DB.exists_hash_id(3), "skipped image should not be inserted"
 	finally:
 		gif_path.unlink()
 
@@ -122,20 +122,20 @@ def main():
 	r = client.post("/ingest_image_batch", json={"items": items})
 	assert r.status_code == 200
 	assert all(item["status"] == "ingested" for item in r.json()), r.json()
-	assert api.db.get_num_embeddings() == 4, "expected 4 embeddings after ingest"
+	assert api.ORCH.DB.get_num_embeddings() == 4, "expected 4 embeddings after ingest"
 
 	# ingesting removes the file from the persistent queue
-	api.db.enqueue_hashes([(99, str(images[0]))])
-	assert api.db.get_num_queue() == 1
+	api.ORCH.DB.enqueue_hashes([(99, str(images[0]))])
+	assert api.ORCH.DB.get_num_queue() == 1
 	r = client.post("/ingest_image_batch", json={"items": [{"hash_id": 99, "path": str(images[0])}]})
 	assert r.json()[0]["status"] == "ingested"
-	assert api.db.get_num_queue() == 0, "ingested file should be dequeued"
+	assert api.ORCH.DB.get_num_queue() == 0, "ingested file should be dequeued"
 
 	# ---- ingest queue: queue_status + work_queue ----
 	assert client.get("/queue_status").json()["queued"] == 0
 	# 100 is new (gets ingested); 1 is already ingested (counted as exists).
 	# Distinct paths: the queue table enforces path UNIQUE.
-	api.db.enqueue_hashes([(100, str(images[0])), (1, str(images[1]))])
+	api.ORCH.DB.enqueue_hashes([(100, str(images[0])), (1, str(images[1]))])
 	assert client.get("/queue_status").json()["queued"] == 2
 	r = client.post("/work_queue", json={"batch_size": 10})
 	body = r.json()
@@ -193,9 +193,9 @@ def main():
 
 	# insert a tag centroid directly; the full /make_tag flow needs a live hydrus,
 	# which the test forces offline (see the /ingest_enqueue 503 assertion above)
-	cent = api.db.get_embedding(1)
-	api.db.insert_tag("species:lopunny", cent)
-	api.db.commit()
+	cent = api.ORCH.DB.get_embedding(1)
+	api.ORCH.DB.insert_tag("species:lopunny", cent)
+	api.ORCH.DB.commit()
 
 	tags = client.get("/list_tags").json()
 	assert tags == ["species:lopunny"], f"list_tags wrong: {tags}"
@@ -207,7 +207,7 @@ def main():
 	# ---- delete ----
 	r = client.post("/delete_hash", params={"hash_id": 12})
 	assert r.status_code == 200 and r.json()["deleted"] is True
-	assert not api.db.exists_hash_id(12), "hash should be gone after delete"
+	assert not api.ORCH.DB.exists_hash_id(12), "hash should be gone after delete"
 
 	# deleting a missing id should 404, not 500
 	r = client.post("/delete_hash", params={"hash_id": 12})
@@ -215,7 +215,7 @@ def main():
 
 	r = client.post("/delete_bucket", params={"bucket_id": bucket_id})
 	assert r.status_code == 200 and r.json()["deleted"] is True
-	assert not api.db.exists_bucket(bucket_id), "bucket should be gone after delete"
+	assert not api.ORCH.DB.exists_bucket(bucket_id), "bucket should be gone after delete"
 
 	# ---- status / counts ----
 	assert isinstance(client.get("/num_embeddings").json(), int)
@@ -231,7 +231,7 @@ def main():
 
 	r = client.post("/update_config", json={"updates": {"SEARCH_LIMIT": 5}})
 	assert r.status_code == 200 and r.json()["SEARCH_LIMIT"] == 5
-	assert (api.config.config_path).exists(), "update_config should persist to disk"
+	assert (api.ORCH.CFG.config_path).exists(), "update_config should persist to disk"
 
 	r = client.post("/update_config", json={"updates": {"NOT_A_KEY": 1}})
 	assert r.status_code == 400, "unknown config key should 400"
@@ -242,10 +242,10 @@ def main():
 	# after unload, model-dependent endpoints 409 again
 	assert client.post("/eval_text", json={"text": "a cat"}).status_code == 409, "eval_text should 409 after unload"
 
-	api.config = real_config
-	api.db.DB.close()
-	api.db = real_db
-	api.model = real_model
+	api.ORCH.CFG = real_config
+	api.ORCH.DB.DB.close()
+	api.ORCH.DB = real_db
+	api.ORCH.MODEL = real_model
 	print("ALL TESTS PASSED")
 
 
