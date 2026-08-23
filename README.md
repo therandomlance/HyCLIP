@@ -57,7 +57,7 @@ Key options:
 
 ```bash
 .venv/bin/python ingest.py /path/to/hydrus/db /path/to/client_files
-.venv/bin/python ingest.py /path/to/hydrus/db /path/to/client_files --max-eval 100 --batch-size 40
+.venv/bin/python ingest.py /path/to/hydrus/db /path/to/client_files --max-eval 100
 ```
 
 Already-ingested files are skipped, so an interrupted run can be resumed by re-running. The web UI's Ingest tab still provides the server-based alternative (tag files in Hydrus with `hyclip:ingest` and drain the persistent queue).
