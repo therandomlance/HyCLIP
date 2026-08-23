@@ -1,14 +1,14 @@
 import os
 import sqlite3
+import tempfile
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+import hydrus_api
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from orchestrator import Orchestrator
-
-from webui.hydrus_api import build_router
 
 ORCH = Orchestrator()
 
@@ -99,7 +99,7 @@ def _assert_bucket_id(bucket_id:int):
 		raise HTTPException(status_code=404, detail=f"bucket_id not found: {bucket_id}")
 
 def _assert_tag(tag:str):
-	if not ORCH.DB.exists_tag(tag)
+	if not ORCH.DB.exists_tag(tag):
 		raise HTTPException(status_code=404, detail=f"tag not found: {tag}")
 
 def _assert_hydrus():
@@ -291,6 +291,10 @@ def update_config(req: UpdateConfigRequest):
 
 
 # ===== Hydrus API / WebUI =====
+@app.get("/hydrus_status")
+def hydrus_status():
+	return ORCH.hydrus_status()
+
 @app.get("/heartbeat")
 def heartbeat():
 	"""All topbar status dots in one call."""
@@ -298,6 +302,7 @@ def heartbeat():
 
 @app.get("/thumbnail")
 def thumbnail(hash_id: int):
+	_assert_hydrus()
 	try:
 		return _hydrus_file(ORCH.HY.get_thumbnail(file_id=hash_id), "image/jpeg")
 	except hydrus_api.APIError as e:
@@ -305,6 +310,7 @@ def thumbnail(hash_id: int):
 
 @app.get("/file")
 def get_file(hash_id: int):
+	_assert_hydrus()
 	try:
 		return _hydrus_file(ORCH.HY.get_file(file_id=hash_id), "application/octet-stream")
 	except hydrus_api.APIError as e:
@@ -312,6 +318,7 @@ def get_file(hash_id: int):
 
 @app.get("/file_path")
 def get_file_path(hash_id: int):
+	_assert_hydrus()
 	try:
 		return {"path": ORCH.HY.get_file_path(file_id=hash_id)["path"]}
 	except hydrus_api.APIError as e:
@@ -320,6 +327,7 @@ def get_file_path(hash_id: int):
 @app.get("/resolve_hash")
 def resolve_hash(hash: str):
 	"""Resolve a hydrus sha256 hash to a file_id (the db's hash_id)."""
+	_assert_hydrus()
 	# TODO find a way to get the hash in a faster way than this heavy API request
 	meta = ORCH.HY.get_file_metadata(hashes=[hash], only_return_identifiers=True).get("metadata", [])
 	
@@ -342,7 +350,7 @@ async def eval_image_upload(request: Request, hash_id: int | None = None):
 	try:
 		with os.fdopen(fd, "wb") as f:
 			f.write(data)
-		embedding = api.model.eval_image(path)
+		embedding = ORCH.MODEL.eval_image(path)
 	finally:
 		os.unlink(path)
 	if embedding is None:
@@ -362,6 +370,7 @@ def add_hashes_to_bucket(req: AddHashesToBucketRequest):
 	if not hashes:
 		return {"added": 0, "pending": [], "already_queued": 0, "unknown": []}
 
+	_assert_hydrus()
 	try:
 		meta = ORCH.HY.get_file_metadata(hashes=hashes, only_return_identifiers=True).get("metadata", [])
 	except hydrus_api.APIError as e:
@@ -408,6 +417,7 @@ def get_tag_embedding(tag: str):
 
 @app.post("/make_tag")
 def make_tag(req: MakeTagRequest):
+	_assert_hydrus()
 	return ORCH.make_tag(req.tag, req.search_limit)
 
 

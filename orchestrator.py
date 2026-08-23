@@ -3,6 +3,7 @@ from db import HyCLIP_DB
 from model import HyCLIP_Model
 
 import hydrus_api
+from hydrus_api import TagAction
 import os
 
 class Orchestrator():
@@ -21,7 +22,7 @@ class Orchestrator():
 	def connect_hydrus(self):
 		self.HY = hydrus_api.Client(api_url=self.CFG.API_URL, access_key=self.CFG.API_KEY)
 
-	def update_config(self, updates)
+	def update_config(self, updates):
 		for key, value in updates.items():
 			setattr(self.CFG, key, value)
 		self.CFG.save_config()
@@ -32,25 +33,25 @@ class Orchestrator():
 		return self.CFG.cfg
 
 	def heartbeat(self):
-	return {
-		"model": {"model": self.MODEL.model_name, "loaded": self.MODEL.model is not None},
-		"hydrus": self.hydrus_status(),
-		"quant_status": ORCH.DB.quant_status,
-		"last_search": ORCH.DB.last_search,
+		return {
+			"model": {"model": self.MODEL.model_name, "loaded": self.MODEL.model is not None},
+			"hydrus": self.hydrus_status(),
+			"quant_status": self.DB.quant_status,
+			"last_search": self.DB.last_search,
 		}
 
 	def hydrus_status(self):
 		"""Probe the hydrus API for the topbar dot. search_files needs the same permission the UI's thumbnails do."""
 		# TODO switch to the /verify_access_key endpoint for hydrus
-		if not ORCH.CFG.API_KEY:
+		if not self.CFG.API_KEY:
 			return {"status": "denied", "detail": "API_KEY not configured"}
 		try:
 			self.HY.search_files(tags=["hyclip:status-probe"], return_file_ids=True)
-		except self.HY.InsufficientAccess:
+		except hydrus_api.InsufficientAccess:
 			return {"status": "denied", "detail": "API key rejected or lacks permissions"}
-		except self.HY.ConnectionError:
-			return {"status": "unreachable", "detail": f"cannot reach {ORCH.CFG.API_URL}"}
-		except self.HY.APIError as e:  # reachable + authenticated, but something else failed
+		except hydrus_api.ConnectionError:
+			return {"status": "unreachable", "detail": f"cannot reach {self.CFG.API_URL}"}
+		except hydrus_api.APIError as e:  # reachable + authenticated, but something else failed
 			return {"status": "denied", "detail": f"hydrus error {e.response.status_code}"}
 		return {"status": "ok", "detail": "connected"}
 
@@ -74,7 +75,7 @@ class Orchestrator():
 
 		return {"hash_id": hash_id, "status": "ingested"}
 
-	def ingest_image_batch(self, pending:list[tuple[int, str]])
+	def ingest_image_batch(self, pending:list[tuple[int, str]]):
 		results = []
 		to_eval = []
 
@@ -91,19 +92,21 @@ class Orchestrator():
 			# List of indexes of pending to evaluate
 			to_eval.append(k)
 
-		embeddings = self.MODEL.eval_image_batch([pending[1][k] for k in to_eval], self.CFG.EVAL_WORKERS)
+		embeddings = self.MODEL.eval_image_batch([pending[k][1] for k in to_eval], self.CFG.EVAL_WORKERS)
 
-		for i, embedding in zip(to_eval, embeddings):
-			hash_id, _ = req.items[i]
+		inserts = []
+		for k, embedding in zip(to_eval, embeddings):
+			hash_id = pending[k][0]
 			if embedding is None:
 				results.append({"hash_id": hash_id, "status": "failed"})
 				continue
 			results.append({"hash_id": hash_id, "status": "ingested"})
+			inserts.append(hash_id)
 			self.DB.insert_embedding(hash_id, embedding)
 
 		self.DB.quant_status = "needs_quant"
 		self.DB.commit()
-		self.DB.dequeue_hashes([hash_id for hash_id, _ in pending])
+		self.DB.dequeue_hashes(inserts)
 
 		return results
 
@@ -119,7 +122,7 @@ class Orchestrator():
 		file_ids = self.HY.search_files(tags=[tag], return_file_ids=True).get("file_ids", [])
 
 		found = len(file_ids)
-		if req.max_evaluate:
+		if max_evaluate:
 			file_ids = file_ids[:max_evaluate]
 
 		to_enqueue = []
@@ -138,7 +141,7 @@ class Orchestrator():
 			if remove_tag:
 				self.HY.add_tags(
 					file_ids=[fid for fid, _ in to_enqueue],
-					service_keys_to_actions_to_tags={self.CFG.TAG_SERVICE_KEY: {TagAction.DELETE: [req.tag]}},
+					service_keys_to_actions_to_tags={self.CFG.TAG_SERVICE_KEY: {TagAction.DELETE: [tag]}},
 				)
 
 		return {"found": found, "enqueued": len(to_enqueue), "skipped": skipped}
@@ -189,8 +192,9 @@ class Orchestrator():
 
 		embeddings = self.DB.get_embeddings(ingested)
 		centroid = self.DB.vec_centroid(embeddings)
-
-		self.DB.insert_tag(req.tag, centroid)
+		if centroid is None:
+			raise ValueError(f'no ingested files match "{tag}"')
+		self.DB.insert_tag(tag, centroid)
 		self.DB.commit()
-		return {"tag": req.tag, "matched": len(file_ids), "ingested": len(ingested)}
+		return {"tag": tag, "matched": len(file_ids), "ingested": len(ingested)}
 
