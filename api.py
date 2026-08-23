@@ -268,6 +268,7 @@ def search_id(req: SearchIDRequest):
 
 @app.post("/search_bucket")
 def search_bucket(req: SearchBucketRequest):
+	_assert_bucket_id(req.bucket_id)
 	return ORCH.search_embedding_bucket(req.embedding, req.bucket_id, req.num_results)
 
 @app.post("/search_id_bucket")
