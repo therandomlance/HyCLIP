@@ -305,10 +305,6 @@ class HyCLIP_DB:
 		else:
 			return self._search_full_scan(embedding, num_results)
 
-	def search_id(self, hash_id:int, num_results:int=100) -> list[tuple[int, float]]:
-		search_emb = self.get_embedding(hash_id)
-		return self.search_embedding(search_emb, num_results)
-
 	def search_embedding_bucket(self, embedding:list[float], bucket_id:int, num_results:int=100) -> list[tuple[int, float]]:
 		self._assert_bucket_id(bucket_id)
 
@@ -326,10 +322,6 @@ class HyCLIP_DB:
 			return self._search_quantize_scan(embedding, num_results, table_name)
 		else:
 			return self._search_full_scan(embedding, num_results, table_name)
-
-	def search_id_bucket(self, hash_id:int, bucket_id:int, num_results:int=100) -> list[tuple[int, float]]:
-		search_emb = self.get_embedding(hash_id)
-		return self.search_embedding_bucket(search_emb, bucket_id, num_results)
 	
 	def search_tags(self, embedding:list[float], limit:int=100) -> list[tuple[str, float]]:
 		return self._search_full_scan(embedding, limit, "tags")

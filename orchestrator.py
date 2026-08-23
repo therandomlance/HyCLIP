@@ -56,6 +56,22 @@ class Orchestrator():
 		return {"status": "ok", "detail": "connected"}
 
 
+	# ===== Search =====
+	def search_embedding(self, embedding:list[float], num_results:int=100):
+		return self.DB.search_embedding(req.embedding, req.num_results)
+
+	def search_embedding_bucket(self, embedding:list[float], bucket_id:int, num_results:int=100):
+		return self.DB.search_embedding_bucket(embedding, bucket_id, num_results)
+
+	def search_id(self, hash_id:int, num_results:int=100):
+		embedding = self.DB.get_embedding(hash_id)
+		return self.search_embedding(embedding, num_results)
+
+	def search_id_bucket(self, hash_id:int, bucket_id:int, num_results:int=100)
+		embedding = self.DB.get_embedding(hash_id)
+		return self.search_embedding_bucket(embedding, bucket_id, num_results)
+
+
 	# ===== Image Ingest =====
 	def ingest_image(self, hash_id:int, path:str):
 		if self.DB.exists_hash_id(hash_id):

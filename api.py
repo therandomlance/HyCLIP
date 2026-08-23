@@ -259,22 +259,22 @@ def db_status():
 
 @app.post("/search")
 def search(req: SearchRequest):
-	return ORCH.DB.search_embedding(req.embedding, req.num_results)
+	return ORCH.search_embedding(req.embedding, req.num_results)
 
 @app.post("/search_id")
 def search_id(req: SearchIDRequest):
 	_assert_hash_id(req.hash_id)
-	return ORCH.DB.search_id(req.hash_id, req.num_results)
+	return ORCH.search_id(req.hash_id, req.num_results)
 
 @app.post("/search_bucket")
 def search_bucket(req: SearchBucketRequest):
-	return ORCH.DB.search_embedding_bucket(req.embedding, req.bucket_id, req.num_results)
+	return ORCH.search_embedding_bucket(req.embedding, req.bucket_id, req.num_results)
 
 @app.post("/search_id_bucket")
 def search_id_bucket(req: SearchIDBucketRequest):
 	_assert_hash_id(req.hash_id)
 	_assert_bucket_id(req.bucket_id)
-	return ORCH.DB.search_id_bucket(req.hash_id, req.bucket_id, req.num_results)
+	return ORCH.search_id_bucket(req.hash_id, req.bucket_id, req.num_results)
 
 
 # ===== Config =====
