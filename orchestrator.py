@@ -18,6 +18,7 @@ class Orchestrator():
 	def shutdown(self):
 		self.MODEL.unload_model()
 		self.DB.commit()
+		self.DB.close()
 
 	def connect_hydrus(self):
 		self.HY = hydrus_api.Client(api_url=self.CFG.API_URL, access_key=self.CFG.API_KEY)
@@ -84,10 +85,11 @@ class Orchestrator():
 		if embedding is None:
 			return {"hash_id": hash_id, "status": "failed"}
 
-		self.DB.insert_embedding(hash_id, embedding)
-		self.DB.quant_status = "needs_quant"
-		self.DB.commit()
-		self.DB.dequeue_hashes([hash_id])
+		with self.DB.lock:
+			self.DB.insert_embedding(hash_id, embedding)
+			self.DB.quant_status = "needs_quant"
+			self.DB.commit()
+			self.DB.dequeue_hashes([hash_id])
 
 		return {"hash_id": hash_id, "status": "ingested"}
 
@@ -111,18 +113,19 @@ class Orchestrator():
 		embeddings = self.MODEL.eval_image_batch([pending[k][1] for k in to_eval], self.CFG.EVAL_WORKERS)
 
 		inserts = []
-		for k, embedding in zip(to_eval, embeddings):
-			hash_id = pending[k][0]
-			if embedding is None:
-				results.append({"hash_id": hash_id, "status": "failed"})
-				continue
-			results.append({"hash_id": hash_id, "status": "ingested"})
-			inserts.append(hash_id)
-			self.DB.insert_embedding(hash_id, embedding)
+		with self.DB.lock:
+			for k, embedding in zip(to_eval, embeddings):
+				hash_id = pending[k][0]
+				if embedding is None:
+					results.append({"hash_id": hash_id, "status": "failed"})
+					continue
+				results.append({"hash_id": hash_id, "status": "ingested"})
+				inserts.append(hash_id)
+				self.DB.insert_embedding(hash_id, embedding)
 
-		self.DB.quant_status = "needs_quant"
-		self.DB.commit()
-		self.DB.dequeue_hashes(inserts)
+			self.DB.quant_status = "needs_quant"
+			self.DB.commit()
+			self.DB.dequeue_hashes(inserts)
 
 		return results
 
@@ -183,16 +186,20 @@ class Orchestrator():
 				continue
 			to_eval.append((hash_id, path))
 
-		for hash_id, embedding in zip([h for h, _ in to_eval], self.MODEL.eval_image_batch([p for _, p in to_eval], self.CFG.EVAL_WORKERS)):
-			if embedding is None:
-				errors += 1
-				continue
-			self.DB.insert_embedding(hash_id, embedding)
-			ingested += 1
+		embeddings = self.MODEL.eval_image_batch([p for _, p in to_eval], self.CFG.EVAL_WORKERS)
+		with self.DB.lock:
+			for hash_id, embedding in zip([h for h, _ in to_eval], embeddings):
+				if embedding is None:
+					errors += 1
+					continue
+				self.DB.insert_embedding(hash_id, embedding)
+				ingested += 1
 
-		self.DB.quant_status = "needs_quant"
-		self.DB.commit()
-		self.DB.dequeue_hashes([fid for fid, _ in batch])
+			self.DB.quant_status = "needs_quant"
+			self.DB.commit()
+			# Failed/missing files are dequeued too (deliberate): keeping them
+			# would make the webui's drain loop spin on permanently bad files
+			self.DB.dequeue_hashes([fid for fid, _ in batch])
 
 		return {"processed": len(batch), "ingested": ingested, "already_ingested": exists,
 			"skipped": skipped, "errors": errors, "remaining": self.DB.get_num_queue() or 0}

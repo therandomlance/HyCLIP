@@ -19,6 +19,11 @@ EMB_DIM = HyCLIP_Model(cfg.CLIP_MODEL, verbose=False).dims  # config only, no we
 
 
 class ProfiledDB(HyCLIP_DB):
+	def search_id(self, hash_id: int, num_results: int = 10):
+		# Mirrors Orchestrator.search_id (HyCLIP_DB itself has no search_id):
+		# fetch the stored embedding, then search globally with it
+		return self.search_embedding(self.get_embedding(hash_id), num_results)
+
 	def random_hash_ids(self, n: int) -> list[int]:
 		ids = self.qe("SELECT hash_id FROM embeddings ORDER BY RANDOM() LIMIT ?", [n])
 		if ids is None:
