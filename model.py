@@ -1,5 +1,6 @@
 import open_clip
 import torch
+import gc
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import os
@@ -81,14 +82,18 @@ class HyCLIP_Model():
 		self.preprocess = None
 		self.tokenizer = None
 
+		gc.collect()
+		if self.device.type == "cuda":
+			torch.cuda.empty_cache()
+
 	def eval_image(self, image_path:str) -> list[float] | None:
 		self._assert_filepath(image_path)
 		self._assert_model_loaded()
 
 		# I have no idea how this works, I just stole it from teh example scripts
 		try:
-			image = Image.open(image_path)
-			image = self.preprocess(image).unsqueeze(0).to(self.device)
+			with Image.open(image_path) as I:
+				image = self.preprocess(I).unsqueeze(0).to(self.device)
 		except Exception as e:
 			# Unreadable/unsupported/huge image (e.g. PIL DecompressionBombError) — caller treats None as a skip
 			print(f"could not evaluate image {image_path}: {e}")
@@ -132,7 +137,8 @@ class HyCLIP_Model():
 		self._assert_model_loaded()
 		
 		tokenized_text = self.tokenizer(text).to(self.device)
-		embedding = self.model.encode_text(tokenized_text)
-		embedding = torch.nn.functional.normalize(embedding, dim=-1)
+		with torch.inference_mode():
+			embedding = self.model.encode_text(tokenized_text)
+			embedding = torch.nn.functional.normalize(embedding, dim=-1)
 
 		return embedding.tolist()[0]

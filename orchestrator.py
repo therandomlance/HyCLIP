@@ -18,6 +18,7 @@ class Orchestrator():
 	def shutdown(self):
 		self.MODEL.unload_model()
 		self.DB.commit()
+		self.DB.close()
 
 	def connect_hydrus(self):
 		self.HY = hydrus_api.Client(api_url=self.CFG.API_URL, access_key=self.CFG.API_KEY)

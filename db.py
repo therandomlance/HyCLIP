@@ -54,11 +54,21 @@ class HyCLIP_DB:
 		self.clean_temp_buckets()
 		self.clean_queue()
 
+	def close(self):
+		if getattr(self, "DB", None) is None:
+			return
+		self.clean_temp_buckets()
+		self.clean_queue()
+		self.DB.close()
+		self.DB = None
+
 	def __del__(self):
-		if self.DB is not None:
-			self.clean_temp_buckets()
-			self.clean_queue()
-			self.DB.close()
+		# GC/interpreter teardown may run this with a broken interpreter or a
+		# half-constructed instance; never let it raise
+		try:
+			self.close()
+		except Exception:
+			pass
 
 	def commit(self):
 		self.DB.commit()
@@ -143,13 +153,11 @@ class HyCLIP_DB:
 	def is_quantized(self, bucket_id:int|None=None) -> bool:
 		table_name = self.quant_cache_table_name(bucket_id)
 		Q = "SELECT EXISTS ( SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)"
-		return bool(self.DB.execute(Q, [table_name]).fetchall())
+		return bool(self.qe(Q, [table_name]))
 
 	# ===== Data Insertion =====
 	def insert_embedding(self, hash_id:int, embedding:list[float]):
 		# IMPORTANT: DOES NOT AUTO-COMMIT
-		# OR IGNORE: a client can abort mid-batch and re-pull the same rows while the
-		# server finishes the old one — duplicate inserts are identical anyway
 		Q = f"INSERT OR IGNORE INTO embeddings (hash_id, embedding) VALUES ( ?, vector_as_f32(?) )"
 		A = [hash_id, str(embedding)]
 		self.DB.execute(Q, A)
@@ -271,10 +279,16 @@ class HyCLIP_DB:
 
 	# ========== Search ==========
 	def _search_full_scan(self, embedding:list[float], num_results:int, table_name:str):
-		self.vector_init("tags", self.model_dims)
+		self.vector_init(table_name, self.model_dims)
 		self.commit()
+
+		if table_name == "tags":
+			id_col = "tag"
+		else:
+			id_col = "hash_id"
+
 		Q = f'''
-			SELECT tag, v.distance
+			SELECT {id_col}, v.distance
 			FROM vector_full_scan('{table_name}', 'embedding', vector_as_f32( ? )) as v
 			INNER JOIN {table_name} ON {table_name}.rowid = v.rowid
 			ORDER BY v.distance

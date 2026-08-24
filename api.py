@@ -117,7 +117,9 @@ def _require_model():
 		raise HTTPException(status_code=409, detail="model not loaded")
 
 def _hydrus_file(r, fallback_type: str):
-	return Response(content=r.content, media_type=r.headers.get("Content-Type", fallback_type))
+	# Hydrus files are immutable per hash_id, so let the browser cache them
+	headers = {"Cache-Control": "private, max-age=86400"}
+	return Response(content=r.content, media_type=r.headers.get("Content-Type", fallback_type), headers=headers)
 
 # ===== Server =====
 @app.get("/")
@@ -168,7 +170,7 @@ def ingest_image(req: IngestRequest):
 	try:
 		return ORCH.ingest_image(req.hash_id, req.path)
 	except RuntimeError as E:
-		raise HTTPException(status_code=409, detail=E)
+		raise HTTPException(status_code=409, detail=str(E))
 
 @app.post("/ingest_image_batch")
 def ingest_image_batch(req: IngestBatchRequest):
