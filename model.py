@@ -101,7 +101,8 @@ class HyCLIP_Model():
 
 	def _preprocess_one(self, path:str) -> torch.Tensor | None:
 		try:
-			return self.preprocess(Image.open(path))
+			with Image.open(path) as I:
+				return self.preprocess(I)
 		except Exception as e:
 			print(f"preprocess could not evaluate image {path}: {e}")
 			return None
