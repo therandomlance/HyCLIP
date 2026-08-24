@@ -17,7 +17,7 @@ class HyCLIP_Config:
 		"SEARCH_LIMIT": 100,
 		"BUCKET_CACHE_TIMEOUT": 300,
 		"EVAL_WORKERS": 8,
-		"INGEST_BATCH_SIZE": 20
+		"INGEST_BATCH_SIZE": 64
 	}
 
 	def __init__(self, cfg_path:str="config.json"):

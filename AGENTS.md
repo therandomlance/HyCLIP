@@ -24,12 +24,12 @@ CLIP-based semantic image search over a [Hydrus](hydrusnetwork.github.io/hydrus/
 .venv/bin/python test/test_profile.py      # needs ingested data; cold search re-quantizes (writes)
 
 # ingest directly into hyclip.db (no server; reads hydrus client.master.db read-only)
-.venv/bin/python ingest.py <hydrus_db_dir> <client_files_dir> [--max-eval N]
+.venv/bin/python ingest.py <hydrus_db_dir> <client_files_dir> [--max-eval N] [--batch-size N]
 ```
 
 There is no lint, typecheck, formatter, or CI config — don't invent commands for them.
 
-Run `ingest.py` from the repo root so it writes to the same `hyclip.db` the server uses; already-ingested files are skipped, so re-running resumes an interrupted ingest. Batch size is `INGEST_BATCH_SIZE` from config (no `--batch-size` flag). The server-based ingest flow (web UI Ingest tab, `ingest_enqueue`/`work_queue` endpoints, persistent queue) still exists in the API.
+Run `ingest.py` from the repo root so it writes to the same `hyclip.db` the server uses; already-ingested files are skipped, so re-running resumes an interrupted ingest. Batch size defaults to `INGEST_BATCH_SIZE` from config and is overridable per run with `--batch-size`. The server-based ingest flow (web UI Ingest tab, `ingest_enqueue`/`work_queue` endpoints, persistent queue) still exists in the API.
 
 ## Gotchas
 
@@ -42,7 +42,7 @@ Run `ingest.py` from the repo root so it writes to the same `hyclip.db` the serv
 - **Embedding dims are coupled**: `HyCLIP_DB(model_dims, quant)` bakes dims in at construction — `orchestrator.py`/`ingest.py` pass `MODEL.dims`, and db search uses `self.model_dims`. But `test_db.py` hardcodes `EMB_DIM = 768` (and `quant_prepare` still defaults to 768). Changing `CLIP_MODEL` to a model with different dims breaks db tests and any `HyCLIP_DB` constructed without explicit dims.
 - **`db.py:insert_embedding` does NOT auto-commit** (documented in code). Callers must `db.commit()`.
 - **`db.qe()` return shape varies** (scalar / tuple / list / None depending on result), and callers wrap single tuples into lists (e.g. `search_embedding`, `get_buckets`, orchestrator `work_queue_batch`). Mind this when using db helpers.
-- **Search re-quantizes on every global↔bucket switch**: `quant_status`+`last_search` gate it, and the whole table quant is synchronous and slow (multi-minute on a big library). `db.py` also resets to `needs_quant` on every startup. Bucket search materializes `temp_bucket_{id}` tables, dropped at startup by `clean_temp_buckets`; `remove_bucket` drops them too.
+- **Search re-quantizes when a table's quantization goes stale**: `db.quant_ready` tracks that per table, so global↔bucket switching no longer re-quantizes on every swap — only writes to a table invalidate it. The whole table quant is still synchronous and slow (multi-minute on a big library), and `quant_ready` is empty at startup, so the first search re-quantizes. `quant_status`/`last_search` remain for observability only. Bucket search materializes `temp_bucket_{id}` tables, dropped at startup by `clean_temp_buckets`; `remove_bucket` drops them too.
 - **`POST /exit` is an unauthenticated `os._exit(0)` kill switch** — the whole server dies. Don't hit it in tests.
 - **Indentation is tabs** everywhere; match it.
 
