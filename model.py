@@ -13,16 +13,12 @@ class HyCLIP_Model():
 		self.VERBOSE = verbose
 		
 		if self.VERBOSE:
-			print(f"model: {model_name}")
 			print("loading config...")
 		
 		self.config = open_clip.get_model_config(self.model_name)
 		self.dims = self.config["embed_dim"]
 
-		if self.VERBOSE:
-			print("getting device...")
-
-		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+		self.get_device()
 
 		self.model = None
 		self.preprocess = None
@@ -34,7 +30,16 @@ class HyCLIP_Model():
 
 	def _assert_model_loaded(self):
 		if not self.model:
-			raise RuntimeError(f"Model not loaded! - {self.model_name}")
+			raise RuntimeError(f"model.py: model not loaded! - {self.model_name}")
+
+	def get_device(self):
+		if self.VERBOSE:
+			print("getting device...")
+
+		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+		if self.VERBOSE:
+			print(f"device: {self.device}")
 
 	def check_filetype(self, filepath:str):
 		IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -52,7 +57,7 @@ class HyCLIP_Model():
 
 	def load_model(self):
 		if self.VERBOSE:
-			print("loading model...")
+			print(f"loading model: {self.model_name}")
 		path = self.cached_path()
 		if path:
 			# Already cached locally - load without pinging huggingface
@@ -69,7 +74,7 @@ class HyCLIP_Model():
 		self.model.eval()
 
 		if self.VERBOSE:
-			print(f"model loaded: {self.model_name}")
+			print(f"model loaded.")
 
 	def unload_model(self):
 		self.model = None
