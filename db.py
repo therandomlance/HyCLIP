@@ -123,6 +123,9 @@ class HyCLIP_DB:
 		embedding.frombytes(blob)
 		return embedding.tolist()
 
+	def list2blob(self, embedding:list[float]) -> bytes:
+		return array.array('f', embedding).tobytes()
+
 	# ===== Value Checks =====
 	def _assert_hash_id(self, hash_id:int):
 		if not self.exists_hash_id(hash_id):
@@ -158,8 +161,8 @@ class HyCLIP_DB:
 	# ===== Data Insertion =====
 	def insert_embedding(self, hash_id:int, embedding:list[float]):
 		# IMPORTANT: DOES NOT AUTO-COMMIT
-		Q = f"INSERT OR IGNORE INTO embeddings (hash_id, embedding) VALUES ( ?, vector_as_f32(?) )"
-		A = [hash_id, str(embedding)]
+		Q = f"INSERT OR IGNORE INTO embeddings (hash_id, embedding) VALUES ( ?, ? )"
+		A = [hash_id, self.list2blob(embedding)]
 		self.DB.execute(Q, A)
 	
 	def new_bucket(self, bucket_name:str) -> int:
@@ -189,7 +192,7 @@ class HyCLIP_DB:
 		return unknown_hashes
 
 	def insert_tag(self, tag:str, embedding:list[float]):
-		self.DB.execute("INSERT OR REPLACE INTO tags (tag, embedding) VALUES ( ?, vector_as_f32(?) )", (tag, str(embedding)))
+		self.DB.execute("INSERT OR REPLACE INTO tags (tag, embedding) VALUES ( ?, ? )", (tag, self.list2blob(embedding)))
 		self.commit()
 
 	# ===== Data Retrieval =====
@@ -289,23 +292,23 @@ class HyCLIP_DB:
 
 		Q = f'''
 			SELECT {id_col}, v.distance
-			FROM vector_full_scan('{table_name}', 'embedding', vector_as_f32( ? )) as v
+			FROM vector_full_scan('{table_name}', 'embedding',  ? ) as v
 			INNER JOIN {table_name} ON {table_name}.rowid = v.rowid
 			ORDER BY v.distance
 			LIMIT ?
 		'''
-		A = [str(embedding), num_results]
+		A = [self.list2blob(embedding), num_results]
 		return self.DB.execute(Q, A).fetchall()
 
 	def _search_quantize_scan(self, embedding:list[float], num_results:int, table_name:str="embeddings"):
 		Q = f'''
 			SELECT hash_id, v.distance
-			FROM vector_quantize_scan('{table_name}', 'embedding', vector_as_f32( ? )) as v
+			FROM vector_quantize_scan('{table_name}', 'embedding',  ? ) as v
 			INNER JOIN {table_name} ON {table_name}.rowid = v.rowid
 			ORDER BY v.distance
 			LIMIT ?
 		'''
-		A = [str(embedding), num_results]
+		A = [self.list2blob(embedding), num_results]
 		return self.DB.execute(Q, A).fetchall()
 
 	def search_embedding(self, embedding:list[float], num_results:int=100) -> list[tuple[int, float]]:
