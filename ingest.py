@@ -84,7 +84,7 @@ def _ingest_folder(folder:str):
 		filepath = os.path.join(folder, file)
 		valid_hashes.append((F.stem, filepath))
 
-	hash_batches = split_into_batches(valid_hashes, CFG.INGEST_BATCH_SIZE)
+	hash_batches = split_into_batches(valid_hashes, BATCH_SIZE)
 
 	for batch in hash_batches:		
 		hashes, filepaths = zip(*batch)
@@ -136,6 +136,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument("db_location", type=str, help="Path to the hydrus db files")
 parser.add_argument("folder", type=str, help="client_files folder to scan")
 parser.add_argument("--max-eval", type=int, default=-1, help="max images to scan in one run")
+parser.add_argument("--batch-size", type=int, default=None, help="images per GPU batch (default: INGEST_BATCH_SIZE from config.json)")
 
 args = parser.parse_args()
 
@@ -151,8 +152,8 @@ MODEL.load_model()
 
 TOP_DIR = args.folder
 MAX_EVAL = args.max_eval
+BATCH_SIZE = args.batch_size or CFG.INGEST_BATCH_SIZE
 
-N = 0
 T = Timer()
 
 # TODO this could get pretty fat for very thick DBs
