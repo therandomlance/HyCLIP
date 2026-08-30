@@ -101,6 +101,7 @@ class HyCLIP_DB:
 		else:
 			return X
 
+
 	# ====== Helpers ======
 	def _get(self, col:str, table:str, values:tuple[str, str]):
 		return self.qe(f"SELECT {col} FROM {table} WHERE {values[0]} = ?", [values[1]])
@@ -139,6 +140,7 @@ class HyCLIP_DB:
 		if not self.exists_tag(tag):
 			raise ValueError(f"tag does not exist: {tag}")
 
+
 	# ===== Existence Checks =====
 	def exists_hash_id(self, hash_id:int) -> bool:
 		return self._exists("embeddings", ("hash_id", hash_id))
@@ -149,14 +151,18 @@ class HyCLIP_DB:
 	def exists_tag(self, tag:str) -> bool:
 		return self._exists("tags", ("tag", tag))
 
+	def exists_table(self, table_name:str) -> bool:
+		Q = "SELECT EXISTS ( SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)"
+		return bool(self.qe(Q, [table_name]))
+
 	def exists_bucket_member(self, bucket_id:int, hash_id:int) -> bool:
 		Q = "SELECT EXISTS ( SELECT 1 FROM bucket_members WHERE bucket_id = ? AND hash_id = ? )"
 		return bool(self.qe(Q, [bucket_id, hash_id]))
 
 	def is_quantized(self, bucket_id:int|None=None) -> bool:
 		table_name = self.quant_cache_table_name(bucket_id)
-		Q = "SELECT EXISTS ( SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)"
-		return bool(self.qe(Q, [table_name]))
+		return self.exists_table(table_name)
+
 
 	# ===== Data Insertion =====
 	def insert_embedding(self, hash_id:int, embedding:list[float]):
@@ -195,6 +201,7 @@ class HyCLIP_DB:
 		self.DB.execute("INSERT OR REPLACE INTO tags (tag, embedding) VALUES ( ?, ? )", (tag, self.list2blob(embedding)))
 		self.commit()
 
+
 	# ===== Data Retrieval =====
 	# Embeddings / hash_id
 	def get_embedding(self, hash_id:int) -> list[float]:
@@ -210,6 +217,7 @@ class HyCLIP_DB:
 	def get_all_hash_ids(self):
 		return [X[0] for X in self.DB.execute("SELECT hash_id FROM embeddings").fetchall()]
 
+
 	# Tags
 	def get_tags(self) -> list[str]:
 		return [X[0] for X in self.DB.execute("SELECT tag FROM tags ORDER BY tag ASC").fetchall()]
@@ -217,6 +225,7 @@ class HyCLIP_DB:
 	def get_tag_embedding(self, tag:str):
 		self._assert_tag(tag)
 		return self.blob2list(self._get("embedding", "tags", ("tag", tag)))
+
 
 	# Buckets
 	def get_bucket_members(self, bucket_id) -> list[int]:
@@ -230,12 +239,27 @@ class HyCLIP_DB:
 		self._assert_bucket_id(bucket_id)
 		return self.qe("SELECT bucket_name FROM buckets WHERE bucket_id = ?", [bucket_id])
 
-	def get_buckets(self):
-		return self.DB.execute("SELECT * FROM buckets").fetchall()
+	def list_buckets(self):
+		return self.DB.execute("SELECT bucket_id, bucket_name FROM buckets").fetchall()
+
+	def list_bucket_cache_tables(self) -> list[str]:
+		return self.DB.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'temp_bucket_%'").fetchall()
 
 	def get_bucket_size(self, bucket_id:int) -> int:
 		self._assert_bucket_id(bucket_id)
 		return self.qe("SELECT COUNT(*) FROM bucket_members WHERE bucket_id = ?", [bucket_id])
+
+
+	# Quant
+	def list_quant_cache_tables(self):
+		return self.qe("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'vector0_%'")
+
+	def quant_count(self, table_name:str) -> int|None:
+		if self.exists_table(table_name):
+			return self.qe(f"SELECT counter FROM {table_name}")
+		else:
+			return None
+
 
 	# ===== Data Removal =====
 	def remove_embedding(self, hash_id:int):
@@ -274,14 +298,44 @@ class HyCLIP_DB:
 
 		self.commit()
 
+	def drop_temp_bucket(self, bucket_id):
+		self.DB.execute(f"DROP TABLE IF EXISTS {self.bucket_cache_table_name(bucket_id)};")
+		self.commit()
+
+	def drop_quant_table(self, bucket_id:int|None=None):
+		self.DB.execute(f"DROP TABLE IF EXISTS {self.quant_cache_table_name(bucket_id)}")
+		self.commit()
+
+	def clean_temp_buckets(self):
+		tables = self.list_bucket_cache_tables()
+		if not tables:
+			return
+
+		for (name,) in tables:
+			self.DB.execute(f"DROP TABLE IF EXISTS {name}")
+
+		self.commit()
+
+	def clean_quant_caches(self):
+		tables = self.list_quant_cache_tables()
+		if not tables:
+			return
+
+		for (name,) in tables:
+			self.DB.execute(f"DROP TABLE IF EXISTS {name}")
+
+		self.commit()
+
+
 	# ===== Data Mutation =====
 	def rename_bucket(self, bucket_id:int, new_bucket_name:str):
 		self._assert_bucket_id(bucket_id)
 		self.DB.execute("UPDATE buckets SET bucket_name = ? WHERE bucket_id = ?", [new_bucket_name, bucket_id])
 		self.commit()
 
+
 	# ========== Search ==========
-	def _search_full_scan(self, embedding:list[float], num_results:int, table_name:str):
+	def _search_full_scan(self, embedding:list[float], num_results:int, table_name:str="embeddings"):
 		self.vector_init(table_name, self.model_dims)
 		self.commit()
 
@@ -328,7 +382,7 @@ class HyCLIP_DB:
 		if not self.bucket_is_init(bucket_id):
 			self.init_bucket(bucket_id)
 
-		table_name = f'temp_bucket_{bucket_id}'
+		table_name = self.bucket_cache_table_name(bucket_id)
 
 		if self.quant_status != "ready" or self.last_search != f"bucket_{bucket_id}":
 			self.quant_prepare(table_name, self.model_dims, self.quant)
@@ -340,14 +394,23 @@ class HyCLIP_DB:
 		else:
 			return self._search_full_scan(embedding, num_results, table_name)
 	
+	def search_id(self, hash_id:int, num_results:int=100):
+		embedding = self.get_embedding(hash_id)
+		return self.search_embedding(embedding, num_results)
+
+	def search_id_bucket(self, hash_id:int, bucket_id:int, num_results:int=100):
+		embedding = self.get_embedding(hash_id)
+		return self.search_embedding_bucket(embedding, bucket_id, num_results)
+	
 	def search_tags(self, embedding:list[float], limit:int=100) -> list[tuple[str, float]]:
 		return self._search_full_scan(embedding, limit, "tags")
+
 
 	# ===== Bucket Search Cache Management =====
 	def init_bucket(self, bucket_id:int):
 		self._assert_bucket_id(bucket_id)
 
-		table_name = f'temp_bucket_{bucket_id}'
+		table_name = self.bucket_cache_table_name(bucket_id)
 
 		self.DB.executescript(f'''
 			DROP TABLE IF EXISTS {table_name};
@@ -367,21 +430,14 @@ class HyCLIP_DB:
 
 		self.commit()
 
+	def bucket_cache_table_name(self, bucket_id:int) -> str:
+		return f'temp_bucket_{bucket_id}'
+
 	def bucket_is_init(self, bucket_id:int) -> bool:
 		Q = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
-		A = [f"temp_bucket_{bucket_id}"]
+		A = [self.bucket_cache_table_name(bucket_id)]
 		return bool(self.qe(Q, A))
-	
-	def drop_temp_bucket(self, bucket_id):
-		self.DB.execute(f"DROP TABLE IF EXISTS temp_bucket_{bucket_id};")
 
-	def clean_temp_buckets(self):
-		tables = self.DB.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'temp_bucket_%'").fetchall()
-
-		for (name,) in tables:
-			self.DB.execute(f"DROP TABLE IF EXISTS {name}")
-
-		self.commit()
 
 	# ===== Filter Search =====
 	# Similar to a bucket, but an ephemeral group of images
@@ -412,10 +468,37 @@ class HyCLIP_DB:
 	# TODO Make sure these old methods still work with the new DB
 
 	def quant_cache_table_name(self, bucket_id:int|None=None) -> str:
-		if not bucket_id:
+		if bucket_id is None:
 			return "vector0_embeddings_embedding"
 		else:
 			return f"vector0_temp_bucket_{bucket_id}_embedding"
+
+	def _quant_status(self) -> list[dict]:
+		status = []
+
+		global_quant = self.is_quantized()
+		global_quant_count = self.quant_count(self.quant_cache_table_name())
+		if global_quant_count:
+			global_quant_diff = global_quant_count - self.get_num_embeddings()
+		else:
+			global_quant_diff = None
+
+		global_status = {"name": "global", "is_quantized": global_quant, "quant_count": global_quant_count, "quant_diff": global_quant_diff}
+		status.append(global_status)
+
+		buckets = self.list_buckets()
+		for bucket_id, bucket_name in buckets:
+			bucket_quant = self.is_quantized(bucket_id)
+			bucket_quant_count = self.quant_count(self.quant_cache_table_name(bucket_id))
+			if bucket_quant_count:
+				bucket_quant_diff = bucket_quant_count - self.get_bucket_size(bucket_id)
+			else:
+				bucket_quant_diff = None
+
+			bucket_status = {"name": bucket_name, "is_quantized": bucket_quant, "quant_count": bucket_quant_count, "quant_diff": bucket_quant_diff}
+			status.append(bucket_status)
+
+		return status
 
 	# quant_status transitions: needs_quant -> quantizing -> ready (back to needs_quant on failure)
 	def quant_prepare(self, table_name:str, model_dims:int=768, quant:str="UINT8"):
@@ -461,6 +544,7 @@ class HyCLIP_DB:
 		Q = f"SELECT vector_quantize_cleanup('{table_name}', 'embedding')"
 		self.DB.execute(Q)
 
+
 	# ===== Ingest Queue =====
 	# Persistent queue of files that need to be ingested
 	def enqueue_hashes(self, hashes:list[tuple[int, str]]):
@@ -473,7 +557,7 @@ class HyCLIP_DB:
 		self.commit()
 	
 	def get_next_queue(self, num:int) -> list[tuple[int, str]]:
-		return self.qe("SELECT hash_id, path FROM temp_embedding_queue LIMIT ?", [num])
+		return self.DB.execute("SELECT hash_id, path FROM temp_embedding_queue LIMIT ?", [num]).fetchall()
 
 	def clean_queue(self):
 		self.DB.execute("DELETE FROM temp_embedding_queue WHERE hash_id IN (SELECT hash_id FROM embeddings)")

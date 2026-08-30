@@ -92,7 +92,7 @@ def main():
 	# rename + list buckets
 	db.rename_bucket(bucket_id, "renamed")
 	assert db.get_bucket_name(bucket_id) == "renamed", "rename_bucket didn't stick"
-	assert db.get_buckets() == [(bucket_id, "renamed")], "get_buckets wrong"
+	assert db.list_buckets() == [(bucket_id, "renamed")], "get_buckets wrong"
 	db.rename_bucket(bucket_id, "test-bucket")
 
 	# ---- global search ----
@@ -154,10 +154,10 @@ def main():
 	assert db.get_queued_ids([hash_ids[0], 99999]) == {hash_ids[0]}, "queue membership check wrong"
 	assert db.get_queued_ids([]) == set(), "empty lookup should be empty set"
 
-	assert db.get_next_queue(1) == (hash_ids[0], str(images[0])), "get_next_queue wrong head"
+	assert db.get_next_queue(1) == [(hash_ids[0], str(images[0]))], "get_next_queue wrong head"
 	db.dequeue_hashes([hash_ids[0]])
 	assert db.get_num_queue() == 1, "dequeue should remove one hash"
-	assert db.get_next_queue(2) == (hash_ids[1], str(images[1])), "get_next_queue after dequeue"
+	assert db.get_next_queue(2) == [(hash_ids[1], str(images[1]))], "get_next_queue after dequeue"
 
 	# ---- removal ----
 	# remove_embedding on a hash that IS in a bucket tears down its membership + temp table
