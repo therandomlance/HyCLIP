@@ -147,8 +147,11 @@ class Orchestrator():
 
 		return {"found": found, "enqueued": len(to_enqueue), "skipped": skipped}
 
-	def work_queue_batch(self, batch_size:int=self.CFG.INGEST_BATCH_SIZE):
+	def work_queue_batch(self, batch_size:int|None=None):
 		# TODO wrap ingest_image_batch and edit webUI for new response structure
+		if batch_size is None:
+			batch_size = self.CFG.INGEST_BATCH_SIZE
+			
 		batch = self.DB.get_next_queue(batch_size)
 
 		ingested = exists = skipped = errors = 0
