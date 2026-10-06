@@ -35,8 +35,9 @@ const PAGES = [
 // ===== Readiness gating =====
 // Buttons marked data-requires="model,hydrus,db,input" are disabled (with a tooltip why)
 // until the model is loaded, the hydrus API is reachable with a valid key,
-// the search DB is not mid-quantize, and there is search input.
-const hyclip = { modelLoaded: false, hydrus: "unknown", quantStatus: "needs_quant", lastSearch: null, currentScope: "global", hasInput: false };
+// no quantize is running, and there is search input.
+// hyclip.quant is the /quant_status list (global + buckets), or null when unreachable.
+const hyclip = { modelLoaded: false, hydrus: "unknown", quant: [], quantizing: false, currentBucketId: null, hasInput: false };
 
 const HYDRUS_LABEL = {
 	ok: "Hydrus API connected",
@@ -46,9 +47,9 @@ const HYDRUS_LABEL = {
 };
 
 const DB_LABEL = {
-	ready: "Search ready",
-	needs_quant: "Needs quant",
-	quantizing: "Quantizing…",
+	ready: "Search index quantized",
+	stale: "Search index quantized but stale",
+	needs_quant: "Search index not quantized (full scan)",
 	unreachable: "Server unreachable",
 };
 
@@ -58,7 +59,7 @@ function updateRequires() {
 		const why = [];
 		if (el.dataset.requires.includes("model") && !hyclip.modelLoaded) why.push("model not loaded");
 		if (el.dataset.requires.includes("hydrus") && hyclip.hydrus !== "ok") why.push(HYDRUS_LABEL[hyclip.hydrus] ?? "Hydrus API not connected");
-		if (el.dataset.requires.includes("db") && hyclip.quantStatus === "quantizing") why.push("search database is quantizing");
+		if (el.dataset.requires.includes("db") && hyclip.quantizing) why.push("search database is quantizing");
 		if (el.dataset.requires.includes("input") && !hyclip.hasInput) why.push("no enabled prompts or reference images");
 		el.disabled = why.length > 0;
 		el.title = why.length ? `Unavailable: ${why.join("; ")}` : "";
@@ -82,31 +83,29 @@ function applyHydrusStatus(st) {
 	updateRequires();
 }
 
-// "ready" only counts for the scope that was last searched (one table is quantized at a time),
-// so a server "ready" for bucket 5 is "needs_quant" while viewing bucket 6.
+// Per-scope quant state: green quantized, yellow quantized-but-stale, red not quantized.
 function effectiveDbStatus() {
-	if (hyclip.quantStatus === "unreachable") return "unreachable";
-	if (hyclip.quantStatus === "quantizing") return "quantizing";
-	if (hyclip.quantStatus === "ready" && hyclip.lastSearch === hyclip.currentScope) return "ready";
-	return "needs_quant";
+	if (hyclip.quant === null) return "unreachable";
+	const scope = hyclip.quant.find((s) => s.bucket_id === hyclip.currentBucketId);
+	if (!scope || !scope.quantized) return "needs_quant";
+	return scope.stale ? "stale" : "ready";
 }
 
 function renderDb() {
 	const eff = effectiveDbStatus();
 	const dot = $("#db-dot");
-	dot.className = "dot " + (eff === "ready" ? "on" : eff === "needs_quant" ? "warn" : "off");
+	dot.className = "dot " + (eff === "ready" ? "on" : eff === "stale" ? "warn" : "off");
 	dot.title = $("#db-name").textContent = DB_LABEL[eff] ?? eff;
 	updateRequires();
 }
 
-function applyDbStatus(qs, lastSearch) {
-	hyclip.quantStatus = qs;
-	if (lastSearch !== undefined) hyclip.lastSearch = lastSearch;
+function applyDbStatus(quant) {
+	hyclip.quant = quant;
 	renderDb();
 }
 
 function setScope(scope) {
-	hyclip.currentScope = scope ? `bucket_${scope}` : "global";
+	hyclip.currentBucketId = scope === "" || scope == null ? null : Number(scope);
 	renderDb();
 }
 
@@ -126,17 +125,97 @@ async function heartbeatTick() {
 		const s = await api("/heartbeat");
 		applyModelStatus(s.model);
 		applyHydrusStatus(s.hydrus.status);
-		applyDbStatus(s.quant_status, s.last_search);
+		applyDbStatus(s.quant);
 	} catch {
 		applyModelStatus(null);
 		applyHydrusStatus("unknown");
-		applyDbStatus("unreachable");
+		applyDbStatus(null);
 	}
 	scheduleHeartbeat();
 }
 // Clear the pending 10s timer before ticking so a poke during a pending tick
 // can't overlap a second tick during the await window.
 function pokeHeartbeat() { clearTimeout(heartbeatTimer); heartbeatTick(); }
+
+// ===== Quant status hover panel =====
+let quantPanelOpen = false;
+function buildQuantPanel() {
+	const group = $("#db-group");
+	const panel = $("#quant-panel");
+	let hideTimer = null;
+
+	const enter = () => { quantPanelOpen = true; clearTimeout(hideTimer); refreshQuantPanel(); };
+	const leave = () => { hideTimer = setTimeout(() => { quantPanelOpen = false; panel.hidden = true; }, 250); };
+	group.onmouseenter = enter;
+	group.onmouseleave = leave;
+	panel.onmouseenter = () => clearTimeout(hideTimer);
+	panel.onmouseleave = leave;
+}
+
+async function refreshQuantPanel() {
+	const panel = $("#quant-panel");
+	let scopes;
+	try { scopes = await api("/quant_status"); }
+	catch { panel.hidden = true; return; }
+	applyDbStatus(scopes);
+	panel.replaceChildren();
+
+	const title = document.createElement("div");
+	title.className = "quant-title";
+	title.textContent = "Quantization";
+	panel.append(title);
+
+	for (const s of scopes) {
+		const row = document.createElement("div");
+		row.className = "quant-row";
+
+		const dot = document.createElement("span");
+		dot.className = "dot " + (!s.quantized ? "off" : s.stale ? "warn" : "on");
+		dot.title = !s.quantized ? "Not quantized" : s.stale ? "Quantized but stale" : "Quantized";
+
+		const name = document.createElement("span");
+		name.className = "quant-name";
+		name.textContent = s.name;
+		name.title = s.name;
+
+		const info = document.createElement("span");
+		info.className = "hint";
+		info.textContent = s.quantized ? `${s.count}/${s.expected}` : `${s.expected} rows`;
+
+		const quant = document.createElement("button");
+		quant.className = "btn small";
+		quant.textContent = s.quantized ? "Re-quant" : "Quantize";
+		quant.disabled = s.expected === 0;
+		quant.onclick = () => runQuantAction("/quantize", s);
+
+		const clear = document.createElement("button");
+		clear.className = "btn small";
+		clear.textContent = "Clear";
+		clear.disabled = !s.quantized;
+		clear.onclick = () => runQuantAction("/clear_quant", s);
+
+		row.append(dot, name, info, quant, clear);
+		panel.append(row);
+	}
+	panel.hidden = !quantPanelOpen;
+}
+
+async function runQuantAction(path, scope) {
+	hyclip.quantizing = true;
+	renderDb();
+	status(`${path === "/quantize" ? "Quantizing" : "Clearing"} ${scope.name}…`);
+	let ok = true;
+	try {
+		await post(path, { bucket_id: scope.bucket_id });
+	} catch (e) {
+		ok = false;
+		status(`Error: ${e.message}`);
+	}
+	hyclip.quantizing = false;
+	await refreshQuantPanel();
+	pokeHeartbeat();
+	if (ok) status("Ready");
+}
 
 function buildTopbar() {
 	const bar = $("#topbar");
@@ -149,8 +228,11 @@ function buildTopbar() {
 		<span id="model-dot" class="dot off"></span>
 		<span id="model-name">…</span>
 		<button id="model-toggle" class="btn small">Load model</button>
-		<span id="db-dot" class="dot warn"></span>
-		<span id="db-name">…</span>
+		<div id="db-group" class="quant-group">
+			<span id="db-dot" class="dot warn"></span>
+			<span id="db-name">…</span>
+			<div id="quant-panel" hidden></div>
+		</div>
 		`;
 
 	const nav = document.createElement("nav");
@@ -165,6 +247,7 @@ function buildTopbar() {
 	}
 
 	bar.append(group, nav);
+	buildQuantPanel();
 
 	$("#model-toggle").onclick = async () => {
 		const loaded = $("#model-dot").classList.contains("on");

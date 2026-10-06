@@ -373,8 +373,6 @@ async function performSearch() {
 		if (!vec) { displayResults([]); status("Search terms cancelled out (zero vector) — adjust weights/signs"); return; }
 
 		const num = parseInt($("#count-input").value) || 30;
-		// A search always quantizes when the current scope isn't ready — show it now, sync via heartbeat after.
-		if (effectiveDbStatus() === "needs_quant") applyDbStatus("quantizing");
 		const searchPromise = state.bucketScope
 			? post("/search_bucket", { embedding: vec, bucket_id: Number(state.bucketScope), num_results: num })
 			: post("/search", { embedding: vec, num_results: num });

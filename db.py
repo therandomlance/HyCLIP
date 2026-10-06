@@ -47,8 +47,6 @@ class HyCLIP_DB:
 
 		self.model_dims = model_dims
 		self.quant = quant
-		self.quant_status = "needs_quant"
-		self.last_search = None
 		self.VERBOSE = verbose
 
 		self.clean_temp_buckets()
@@ -127,6 +125,18 @@ class HyCLIP_DB:
 	def list2blob(self, embedding:list[float]) -> bytes:
 		return array.array('f', embedding).tobytes()
 
+	def bucket_cache_table_name(self, bucket_id:int|None=None) -> str:
+		if bucket_id is None:
+			return "embeddings"
+		else:
+			return f'temp_bucket_{bucket_id}'
+
+	def quant_cache_table_name(self, bucket_id:int|None=None) -> str:
+		if bucket_id is None:
+			return "vector0_embeddings_embedding"
+		else:
+			return f"vector0_temp_bucket_{bucket_id}_embedding"
+
 	# ===== Value Checks =====
 	def _assert_hash_id(self, hash_id:int):
 		if not self.exists_hash_id(hash_id):
@@ -190,9 +200,7 @@ class HyCLIP_DB:
 
 		if self.bucket_is_init(bucket_id):
 			self.init_bucket(bucket_id)
-		
-		# Forces a quant on bucket search but not global (the slow one)
-		self.last_search = "global"
+
 		self.commit()
 
 		return unknown_hashes
@@ -256,7 +264,8 @@ class HyCLIP_DB:
 
 	def quant_count(self, table_name:str) -> int|None:
 		if self.exists_table(table_name):
-			return self.qe(f"SELECT counter FROM {table_name}")
+			# one row per quant segment; counter is that segment's vector count
+			return self.qe(f"SELECT SUM(counter) FROM {table_name}")
 		else:
 			return None
 
@@ -271,9 +280,6 @@ class HyCLIP_DB:
 
 		self._delete("embeddings", ("hash_id", hash_id))
 
-		# Might not be necessary but holding onto it for now
-		# self.quant_status = "needs_quant"
-		
 		self.commit()
 
 	def remove_bucket(self, bucket_id:int):
@@ -293,13 +299,17 @@ class HyCLIP_DB:
 		if self.bucket_is_init(bucket_id):
 			self.DB.executemany(f"DELETE FROM temp_bucket_{bucket_id} WHERE hash_id = ?", [(X,) for X in hash_ids])
 
-		if self.last_search == f"bucket_{bucket_id}":
-			self.quant_status = "needs_quant"
-
 		self.commit()
 
-	def drop_temp_bucket(self, bucket_id):
-		self.DB.execute(f"DROP TABLE IF EXISTS {self.bucket_cache_table_name(bucket_id)};")
+	def drop_temp_bucket(self, bucket_id:int):
+		if bucket_id is None:
+			return
+
+		table_name = self.bucket_cache_table_name(bucket_id)
+		# Drop the orphan quant cache too, else a later table with the same name scans stale rows
+		self.quantize_preload_cleanup(bucket_id)
+		self.drop_quant_table(bucket_id)
+		self.DB.execute(f"DROP TABLE IF EXISTS {table_name};")
 		self.commit()
 
 	def drop_quant_table(self, bucket_id:int|None=None):
@@ -307,9 +317,11 @@ class HyCLIP_DB:
 		self.commit()
 
 	def clean_temp_buckets(self):
-		tables = self.list_bucket_cache_tables()
-		if not tables:
-			return
+		# Temp buckets don't survive a restart; their quant caches are orphans, so drop both
+		tables = self.DB.execute(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND "
+			"(name LIKE 'temp_bucket_%' OR name LIKE 'vector0_temp_bucket_%')"
+		).fetchall()
 
 		for (name,) in tables:
 			self.DB.execute(f"DROP TABLE IF EXISTS {name}")
@@ -336,9 +348,6 @@ class HyCLIP_DB:
 
 	# ========== Search ==========
 	def _search_full_scan(self, embedding:list[float], num_results:int, table_name:str="embeddings"):
-		self.vector_init(table_name, self.model_dims)
-		self.commit()
-
 		if table_name == "tags":
 			id_col = "tag"
 		else:
@@ -366,11 +375,8 @@ class HyCLIP_DB:
 		return self.DB.execute(Q, A).fetchall()
 
 	def search_embedding(self, embedding:list[float], num_results:int=100) -> list[tuple[int, float]]:
-		if self.quant_status != "ready" or self.last_search != "global":
-			self.quant_prepare("embeddings", self.model_dims, self.quant)
-
-		self.last_search = "global"
-
+		# Search never auto-quantizes; use the quant table if it exists, else full scan.
+		# The caller must have vector_init'd the scope on this connection.
 		if self.is_quantized():
 			return self._search_quantize_scan(embedding, num_results)
 		else:
@@ -384,11 +390,6 @@ class HyCLIP_DB:
 
 		table_name = self.bucket_cache_table_name(bucket_id)
 
-		if self.quant_status != "ready" or self.last_search != f"bucket_{bucket_id}":
-			self.quant_prepare(table_name, self.model_dims, self.quant)
-
-		self.last_search = f"bucket_{bucket_id}"
-		
 		if self.is_quantized(bucket_id):
 			return self._search_quantize_scan(embedding, num_results, table_name)
 		else:
@@ -412,6 +413,10 @@ class HyCLIP_DB:
 
 		table_name = self.bucket_cache_table_name(bucket_id)
 
+		# Rebuilding the source table orphans its quant cache; free the preload and drop it
+		self.quantize_preload_cleanup(bucket_id)
+		self.drop_quant_table(bucket_id)
+
 		self.DB.executescript(f'''
 			DROP TABLE IF EXISTS {table_name};
 
@@ -429,9 +434,6 @@ class HyCLIP_DB:
 		''', [bucket_id])
 
 		self.commit()
-
-	def bucket_cache_table_name(self, bucket_id:int) -> str:
-		return f'temp_bucket_{bucket_id}'
 
 	def bucket_is_init(self, bucket_id:int) -> bool:
 		Q = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
@@ -467,52 +469,33 @@ class HyCLIP_DB:
 	# TODO Check if sqlite-vector can have multiple tables quantized at the same time
 	# TODO Make sure these old methods still work with the new DB
 
-	def quant_cache_table_name(self, bucket_id:int|None=None) -> str:
-		if bucket_id is None:
-			return "vector0_embeddings_embedding"
-		else:
-			return f"vector0_temp_bucket_{bucket_id}_embedding"
 
-	def _quant_status(self) -> list[dict]:
-		status = []
 
-		global_quant = self.is_quantized()
-		global_quant_count = self.quant_count(self.quant_cache_table_name())
-		if global_quant_count:
-			global_quant_diff = global_quant_count - self.get_num_embeddings()
-		else:
-			global_quant_diff = None
+	def _quant_status(self, bucket_id:int|None=None) -> dict:
+		"""Per-scope quant state, derived from the quant table itself (no runtime flag)."""
+		quantized = self.is_quantized(bucket_id)
+		count = self.quant_count(self.quant_cache_table_name(bucket_id))
+		expected = self.get_num_embeddings() if bucket_id is None else self.get_bucket_size(bucket_id)
+		return {
+			"bucket_id": bucket_id,
+			"quantized": quantized,
+			"count": count,
+			"expected": expected,
+			"stale": bool(quantized and count != expected),
+		}
 
-		global_status = {"name": "global", "is_quantized": global_quant, "quant_count": global_quant_count, "quant_diff": global_quant_diff}
-		status.append(global_status)
-
-		buckets = self.list_buckets()
-		for bucket_id, bucket_name in buckets:
-			bucket_quant = self.is_quantized(bucket_id)
-			bucket_quant_count = self.quant_count(self.quant_cache_table_name(bucket_id))
-			if bucket_quant_count:
-				bucket_quant_diff = bucket_quant_count - self.get_bucket_size(bucket_id)
-			else:
-				bucket_quant_diff = None
-
-			bucket_status = {"name": bucket_name, "is_quantized": bucket_quant, "quant_count": bucket_quant_count, "quant_diff": bucket_quant_diff}
-			status.append(bucket_status)
-
+	def quant_status(self) -> list[dict]:
+		status = [{"name": "global", **self._quant_status()}]
+		for bucket_id, bucket_name in self.list_buckets():
+			status.append({"name": bucket_name, **self._quant_status(bucket_id)})
 		return status
 
-	# quant_status transitions: needs_quant -> quantizing -> ready (back to needs_quant on failure)
-	def quant_prepare(self, table_name:str, model_dims:int=768, quant:str="UINT8"):
-		self.quant_status = "quantizing"
-		try:
-			self.quantize_preload_cleanup(table_name)
-			self.vector_init(table_name, model_dims)
-			self.vector_quantize(table_name, quant)
-			self.quantize_preload(table_name)
-			self.commit()
-		except Exception:
-			self.quant_status = "needs_quant"
-			raise
-		self.quant_status = "ready"
+	# The caller must vector_init the scope first (orchestrator does this once per connection).
+	def quant_prepare(self, bucket_id:int|None=None, quant:str="UINT8"):
+		self.quantize_preload_cleanup(bucket_id)
+		self.vector_quantize(quant, bucket_id)
+		self.quantize_preload(bucket_id)
+		self.commit()
 
 	def show_quantize_preload_size(self, table_name:str) -> int:
 		Q = f"SELECT vector_quantize_memory('{table_name}', 'embedding')"
@@ -521,12 +504,14 @@ class HyCLIP_DB:
 			print(f"Quantize preload size: {size}")
 		return size
 	
-	def vector_init(self, table_name:str, dimensions:int):
+	def vector_init(self, dimensions:int, bucket_id:int|None=None):
+		table_name = self.bucket_cache_table_name(bucket_id)
 		Q = f"SELECT vector_init('{table_name}', 'embedding', 'dimension={dimensions}')"
 		self.DB.execute(Q)
 
 	# Returns the amount of successfully quantized rows 
-	def vector_quantize(self, table_name:str, quant:str) -> int:
+	def vector_quantize(self, quant:str, bucket_id:int|None=None) -> int:
+		table_name = self.bucket_cache_table_name(bucket_id)
 		if self.VERBOSE:
 			print("Quantizing...")
 		quant = self.qe(f"SELECT vector_quantize('{table_name}', 'embedding', 'qtype={quant}')")
@@ -536,11 +521,13 @@ class HyCLIP_DB:
 		
 		return quant
 	
-	def quantize_preload(self, table_name:str):
+	def quantize_preload(self, bucket_id:int|None=None):
+		table_name = self.bucket_cache_table_name(bucket_id)
 		Q = f"SELECT vector_quantize_preload('{table_name}', 'embedding')"
 		self.DB.execute(Q)
 
-	def quantize_preload_cleanup(self, table_name:str):
+	def quantize_preload_cleanup(self, bucket_id:int|None=None):
+		table_name = self.bucket_cache_table_name(bucket_id)
 		Q = f"SELECT vector_quantize_cleanup('{table_name}', 'embedding')"
 		self.DB.execute(Q)
 

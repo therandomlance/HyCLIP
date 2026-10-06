@@ -259,24 +259,28 @@ Delete an embedding and its bucket memberships.
 ### `GET /num_embeddings`
 Total number of ingested embeddings (a bare integer).
 
-### `GET /db_status`
-Quantization status of the search index, polled by the web UI's DB status dot. `quant_status` is one of:
-
-- `"needs_quant"` — embeddings or bucket members changed since the last quantize; the next search will re-quantize first (slow on large libraries)
-- `"quantizing"` — a search is actively re-quantizing the index; searches block until it finishes
-- `"ready"` — index is quantized and searches run immediately
-
-`last_search` is the scope of the most recent search: `"global"`, `"bucket_<bucket_id>"`, or `null` if none. Because only one table is quantized at a time, `"ready"` is only accurate for the scope named by `last_search` — the web UI compares it against the currently-selected scope.
+### `GET /quant_status`
+Combined quant state for every search scope: global first, then each bucket. Search never quantizes on its own, so this drives the web UI's DB status dot and topbar hover panel. A scope is green when its quant table exists and its row count matches the source, yellow when it exists but is stale, red when it doesn't (search falls back to a full scan).
 
 **Response**
 ```json
-{"quant_status": "ready", "last_search": "bucket_3"}
+[
+  {"name": "global", "bucket_id": null, "quantized": true, "count": 800, "expected": 800, "stale": false},
+  {"name": "cats", "bucket_id": 3, "quantized": true, "count": 40, "expected": 52, "stale": true}
+]
 ```
+`count` is the quant table's row count, `expected` the current source count (all embeddings for global, bucket members otherwise).
+
+### `POST /quantize`
+Manually (re)quantize one scope. Synchronous and slow on large scopes. Request `{"bucket_id": 3}` for a bucket, or `{}` / `{"bucket_id": null}` for global. Returns that scope's `/quant_status` entry.
+
+### `POST /clear_quant`
+Drop one scope's quant table so search falls back to a full scan. Same request body as `/quantize`; returns the scope's updated status entry.
 
 Takes an embedding (from `eval_image`/`eval_text`) or a `hash_id` and returns the nearest `hash_id`s ordered by distance (ascending). Both variants return arrays and auto-initialize their search tables on first use.
 
 ### `POST /search`
-Global search across all embeddings (re-quantizes the embeddings table on each call).
+Global search across all embeddings (uses the quantized index if present, else a full scan).
 
 **Request**
 ```json
@@ -395,8 +399,8 @@ Hydrus proxy errors (thumbnail/file/file_path/resolve_hash) are forwarded with H
 
 ## Gotchas
 
-- `insert_into_bucket` does not refresh a bucket's temp search table. Members added to a bucket that has already been searched won't appear in `search_bucket` results until the server restarts (temp tables are dropped on startup).
-- `search` re-quantizes the whole embeddings table when embeddings changed or the last search was on a bucket, so it's slow on large libraries; `search_bucket` only pays that cost when its bucket is first searched. Poll `/db_status` to see when this is happening.
+- `insert_into_bucket` rebuilds a bucket's temp search table if it was already initialized and drops its now-orphaned quant cache, so the bucket reads as not quantized (red) until you re-quantize it. Removing a member keeps the quant table, so the bucket reads as stale (yellow).
+- Search never quantizes. `search`/`search_bucket` use a scope's quantized index whenever its quant table exists, stale or not, otherwise a full scan. Row count only affects the status color (yellow = stale), not the search path. Quantize/clear manually from the topbar hover panel (`POST /quantize` / `POST /clear_quant`).
 
 ## Web UI / Hydrus proxy
 
@@ -416,11 +420,11 @@ Probe the hydrus connection for the web UI status dot (probes `search_files`, wh
 ```
 
 ### `GET /heartbeat`
-All topbar status probes in one call — what the web UI polls every 10s (with an immediate re-sync after each search). `model` is the `/model_status` payload, `hydrus` the `/hydrus_status` payload (probed at most every 10s, cached in between), and `quant_status`/`last_search` the `/db_status` payload.
+All topbar status probes in one call — what the web UI polls every 10s (with an immediate re-sync after each search). `model` is the `/model_status` payload, `hydrus` the `/hydrus_status` payload (probed at most every 10s, cached in between), and `quant` the `/quant_status` payload.
 
 **Response**
 ```json
-{"model": {"model": "ViT-B-16-SigLIP2", "loaded": true}, "hydrus": {"status": "ok", "detail": "connected"}, "quant_status": "ready", "last_search": "bucket_3"}
+{"model": {"model": "ViT-B-16-SigLIP2", "loaded": true}, "hydrus": {"status": "ok", "detail": "connected"}, "quant": [{"name": "global", "bucket_id": null, "quantized": true, "count": 800, "expected": 800, "stale": false}]}
 ```
 
 ### `POST /ingest_enqueue`

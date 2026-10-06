@@ -9,7 +9,8 @@ from config import HyCLIP_Config
 from model import HyCLIP_Model
 
 # Run from the repo root so this hits the real hyclip.db + config.json.
-# Search is read-only; only the first (cold) search re-quantizes, same as server startup.
+# Search is read-only and never quantizes; it uses the existing quant table if
+# present, else a full scan. vector_init is per-connection, so do it once here.
 
 N_SEARCHES = 100
 NUM_RESULTS = 10
@@ -31,6 +32,8 @@ def main():
 	n = db.get_num_embeddings()
 	assert n, "no embeddings in hyclip.db — run ingest.py first"
 
+	db.vector_init(EMB_DIM)
+
 	first_start = time.perf_counter()
 	db.search_id(db.random_hash_ids(1)[0], num_results=NUM_RESULTS)
 	first_elapsed = time.perf_counter() - first_start
@@ -47,7 +50,7 @@ def main():
 
 	avg = sum(times) / len(times)
 	print(f"N={n} embeddings, {N_SEARCHES} searches, {NUM_RESULTS} results each")
-	print(f"first search (cold, incl quant): {first_elapsed:.3f}s")
+	print(f"first search (cold): {first_elapsed:.3f}s")
 	print(f"avg search: {avg * 1000:.2f} ms")
 	print(f"min search: {min(times) * 1000:.2f} ms")
 	print(f"max search: {max(times) * 1000:.2f} ms")

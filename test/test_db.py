@@ -74,9 +74,7 @@ def main():
 	assert db.exists_bucket(bucket_id)
 
 	db.add_to_bucket(bucket_id, hash_ids[:4])
-	# adding members only affects bucket searches; the last_search flip forces
-	# that bucket to re-quant without re-quantizing the (slow) global index
-	assert db.last_search == "global", "bucket change should force a bucket re-quant on next search"
+	assert not db._quant_status(bucket_id)["quantized"], "fresh bucket should not be quantized"
 	assert db.get_bucket_size(bucket_id) == 4, "wrong bucket size"
 	assert db.get_bucket_name(bucket_id) == "test-bucket"
 
@@ -95,28 +93,47 @@ def main():
 	assert db.list_buckets() == [(bucket_id, "renamed")], "get_buckets wrong"
 	db.rename_bucket(bucket_id, "test-bucket")
 
-	# ---- global search ----
-	db.quant_prepare("embeddings", EMB_DIM, QUANT)
-	assert db.quant_status == "ready", "quant status should be ready after quant_prepare"
+	# ---- global quant + search (search never auto-quantizes) ----
+	assert not db._quant_status()["quantized"], "fresh db should not be quantized"
+	assert db._quant_status()["stale"] is False
+	db.vector_init(EMB_DIM)
+	db.quant_prepare(quant=QUANT)
+	assert db._quant_status()["quantized"], "global should be quantized after quant_prepare"
 	results = db.search_embedding(make_embedding(0), num_results=3)
-	assert db.last_search == "global", "global search should record last_search"
 	assert len(results) == 3, f"expected 3 results, got {len(results)}"
 	dists = [d for _, d in results]
 	assert dists == sorted(dists), "results not ordered by distance"
 
+	# stale = quant row count no longer matches the source table
+	db.insert_embedding(999, make_embedding(3))
+	db.commit()
+	assert db._quant_status()["stale"], "count mismatch should read as stale"
+	db.remove_embedding(999)
+	assert not db._quant_status()["stale"], "removal should restore the count"
+
+	# a real quant table is split into segments (one row each), so the count must sum them
+	db.DB.execute("CREATE TABLE vector0_seg_test (rowid1 INTEGER, rowid2 INTEGER, counter INTEGER, data BLOB)")
+	db.DB.executemany("INSERT INTO vector0_seg_test (counter) VALUES (?)", [(10,), (20,), (5,)])
+	assert db.quant_count("vector0_seg_test") == 35, "quant_count should sum segment counters"
+	db.DB.execute("DROP TABLE vector0_seg_test")
+	db.commit()
+
 	# ---- bucket search ----
 	db.init_bucket(bucket_id)
 	assert db.bucket_is_init(bucket_id), "bucket should be initialized"
+	db.vector_init(EMB_DIM, bucket_id)
+	db.quant_prepare(bucket_id, QUANT)
+	assert not db._quant_status(bucket_id)["stale"], "freshly quantized bucket should not be stale"
 	bucket_results = db.search_embedding_bucket(make_embedding(1), bucket_id, num_results=2)
 	assert len(bucket_results) == 2, "bucket search should return requested count"
 	assert all(h in set(hash_ids[:4]) for h, _ in bucket_results), "bucket search returned non-member"
 
-	# remove_from_bucket: only removes existing members; syncs the temp table; forces re-quant
+	# remove_from_bucket: only removes existing members; syncs the temp table; leaves quant stale
 	db.remove_from_bucket(bucket_id, [1, 99999])
 	assert db.get_bucket_size(bucket_id) == 3, "remove_from_bucket wrong size"
 	assert set(db.get_bucket_members(bucket_id)) == set(hash_ids[1:4]), "remove_from_bucket removed wrong members"
 	assert not db.exists_bucket_member(bucket_id, 99999), "non-member should be skipped"
-	assert db.quant_status == "needs_quant", "removing from the active bucket should force re-quant"
+	assert db._quant_status(bucket_id)["stale"], "removing a member should leave the bucket quant stale"
 	assert db.qe(f"SELECT COUNT(*) FROM temp_bucket_{bucket_id}") == 3, "temp bucket should sync removals"
 
 	# ---- tags ----
@@ -142,7 +159,9 @@ def main():
 	tags = db.get_tags()
 	assert isinstance(tags, list) and set(tags) == {"species:gardevoir", "species:lopunny"}, f"get_tags wrong: {tags}"
 
-	# search_tags: linear scan ordered by distance; the query vector's own tag is nearest
+	# search_tags: linear scan ordered by distance; the query vector's own tag is nearest.
+	# vector_init only maps global/bucket scopes now, so init the tags table directly.
+	db.DB.execute(f"SELECT vector_init('tags', 'embedding', 'dimension={EMB_DIM}')")
 	hits = db.search_tags(make_embedding(1), limit=10)
 	assert hits and hits[0][0] == "species:lopunny", f"nearest tag wrong: {hits}"
 	assert [d for _, d in hits] == sorted(d for _, d in hits), "search_tags not ordered by distance"

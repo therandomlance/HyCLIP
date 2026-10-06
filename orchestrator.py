@@ -12,6 +12,9 @@ class Orchestrator():
 		self.MODEL = HyCLIP_Model(self.CFG.CLIP_MODEL)
 		self.DB = HyCLIP_DB(self.MODEL.dims, self.CFG.VECTOR_QUANT)
 
+		# vector_init is per-connection; remember which scopes this connection has init'd
+		self.init_scopes = set()
+
 		self.connect_hydrus()
 
 	# ===== Housekeeping =====
@@ -37,9 +40,35 @@ class Orchestrator():
 		return {
 			"model": {"model": self.MODEL.model_name, "loaded": self.MODEL.model is not None},
 			"hydrus": self.hydrus_status(),
-			"quant_status": self.DB.quant_status,
-			"last_search": self.DB.last_search,
+			"quant": self.DB.quant_status(),
 		}
+
+
+	# ===== Quant =====
+	def ensure_init(self, bucket_id:int|None=None):
+		"""vector_init each scope's table once per connection before searching/quantizing it."""
+		if bucket_id is not None and not self.DB.bucket_is_init(bucket_id):
+			self.DB.init_bucket(bucket_id)
+
+		if bucket_id not in self.init_scopes:
+			self.DB.vector_init(self.DB.model_dims, bucket_id)
+			self.init_scopes.add(bucket_id)
+
+	def quantize(self, bucket_id:int|None=None) -> dict:
+		status = self.DB._quant_status(bucket_id)
+		if status["expected"] == 0:
+			return status  # the vector extension errors on an empty quantize
+
+		self.ensure_init(bucket_id)
+		self.DB.quant_prepare(bucket_id, self.DB.quant)
+
+		return self.DB._quant_status(bucket_id)
+
+	def clear_quant(self, bucket_id:int|None=None) -> dict:
+		self.DB.quantize_preload_cleanup(bucket_id)
+		self.DB.drop_quant_table(bucket_id)
+		self.init_scopes.discard(bucket_id)
+		return self.DB._quant_status(bucket_id)
 
 	def hydrus_status(self):
 		"""Probe the hydrus API for the topbar dot. search_files needs the same permission the UI's thumbnails do."""
@@ -70,7 +99,6 @@ class Orchestrator():
 			return {"hash_id": hash_id, "status": "failed"}
 
 		self.DB.insert_embedding(hash_id, embedding)
-		self.DB.quant_status = "needs_quant"
 		self.DB.commit()
 		self.DB.dequeue_hashes([hash_id])
 
@@ -105,7 +133,6 @@ class Orchestrator():
 			inserts.append(hash_id)
 			self.DB.insert_embedding(hash_id, embedding)
 
-		self.DB.quant_status = "needs_quant"
 		self.DB.commit()
 		self.DB.dequeue_hashes(inserts)
 
@@ -175,7 +202,6 @@ class Orchestrator():
 			self.DB.insert_embedding(hash_id, embedding)
 			ingested += 1
 
-		self.DB.quant_status = "needs_quant"
 		self.DB.commit()
 		self.DB.dequeue_hashes([fid for fid, _ in batch])
 

@@ -45,6 +45,7 @@ def main():
 	api.ORCH.MODEL = HyCLIP_Model(api.ORCH.CFG.CLIP_MODEL, verbose=False)
 	EMB_DIM = api.ORCH.MODEL.dims  # follow the configured model, not a hardcoded dim
 	api.ORCH.DB = HyCLIP_DB(EMB_DIM, api.ORCH.CFG.VECTOR_QUANT, str(DB_PATH), verbose=False)
+	api.ORCH.init_scopes.clear()  # init tracking is per-connection; this is a new one
 
 	client = TestClient(api.app)
 
@@ -80,7 +81,7 @@ def main():
 
 	# ---- heartbeat: aggregates model + hydrus + db status ----
 	hb = client.get("/heartbeat").json()
-	assert {"model", "hydrus", "quant_status", "last_search"} <= set(hb), "heartbeat missing keys"
+	assert {"model", "hydrus", "quant"} <= set(hb), "heartbeat missing keys"
 	assert hb["model"]["loaded"] is False
 	assert hb["hydrus"]["status"] == "denied"
 
@@ -185,6 +186,20 @@ def main():
 
 	assert client.post("/search_id", json={"hash_id": 99999}).status_code == 404
 
+	# ---- quant: status, manual quantize, clear; search never auto-quantizes ----
+	qs = client.get("/quant_status").json()
+	assert isinstance(qs, list) and qs[0]["name"] == "global", "quant_status should list global first"
+	assert {"bucket_id", "quantized", "count", "expected", "stale"} <= set(qs[0]), "quant_status shape"
+	assert qs[0]["bucket_id"] is None and qs[0]["quantized"] is False, "searches above must not quantize"
+	r = client.post("/quantize", json={})
+	assert r.status_code == 200 and r.json()["quantized"] is True, "manual global quantize failed"
+	assert client.get("/quant_status").json()[0]["quantized"] is True
+	r = client.post("/quantize", json={"bucket_id": bucket_id})
+	assert r.status_code == 200 and r.json()["bucket_id"] == bucket_id
+	r = client.post("/clear_quant", json={})
+	assert r.status_code == 200 and r.json()["quantized"] is False, "clear_quant should drop the table"
+	assert client.post("/quantize", json={"bucket_id": 99999}).status_code == 404
+
 	# ---- tags ----
 	# /list_tags on an empty tags table -> [] (db.get_tags wraps the polymorphic qe None)
 	assert client.get("/list_tags").json() == [], "list_tags should be [] when empty"
@@ -219,8 +234,7 @@ def main():
 
 	# ---- status / counts ----
 	assert isinstance(client.get("/num_embeddings").json(), int)
-	db_stat = client.get("/db_status").json()
-	assert {"quant_status", "last_search"} <= set(db_stat), "db_status missing keys"
+	assert isinstance(client.get("/quant_status").json(), list)
 
 	# get_embedding for a missing id should 404
 	assert client.get("/get_embedding", params={"hash_id": 99999}).status_code == 404

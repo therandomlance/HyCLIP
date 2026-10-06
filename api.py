@@ -68,6 +68,9 @@ class SearchBucketRequest(BaseModel):
 	bucket_id: int
 	num_results: int = 100
 
+class QuantScopeRequest(BaseModel):
+	bucket_id: int | None = None  # None = global
+
 class UpdateConfigRequest(BaseModel):
 	updates: dict
 
@@ -255,28 +258,45 @@ def delete_hash(hash_id: int):
 def num_embeddings():
 	return ORCH.DB.get_num_embeddings()
 
-@app.get("/db_status")
-def db_status():
-	return {"quant_status": ORCH.DB.quant_status, "last_search": ORCH.DB.last_search}
+@app.get("/quant_status")
+def quant_status():
+	"""Combined quant state: global first, then every bucket."""
+	return ORCH.DB.quant_status()
+
+@app.post("/quantize")
+def quantize(req: QuantScopeRequest):
+	if req.bucket_id is not None:
+		_assert_bucket_id(req.bucket_id)
+	return ORCH.quantize(req.bucket_id)
+
+@app.post("/clear_quant")
+def clear_quant(req: QuantScopeRequest):
+	if req.bucket_id is not None:
+		_assert_bucket_id(req.bucket_id)
+	return ORCH.clear_quant(req.bucket_id)
 
 @app.post("/search")
 def search(req: SearchRequest):
+	ORCH.ensure_init()
 	return ORCH.DB.search_embedding(req.embedding, req.num_results)
 
 @app.post("/search_id")
 def search_id(req: SearchIDRequest):
 	_assert_hash_id(req.hash_id)
+	ORCH.ensure_init()
 	return ORCH.DB.search_id(req.hash_id, req.num_results)
 
 @app.post("/search_bucket")
 def search_bucket(req: SearchBucketRequest):
 	_assert_bucket_id(req.bucket_id)
+	ORCH.ensure_init(req.bucket_id)
 	return ORCH.DB.search_embedding_bucket(req.embedding, req.bucket_id, req.num_results)
 
 @app.post("/search_id_bucket")
 def search_id_bucket(req: SearchIDBucketRequest):
 	_assert_hash_id(req.hash_id)
 	_assert_bucket_id(req.bucket_id)
+	ORCH.ensure_init(req.bucket_id)
 	return ORCH.DB.search_id_bucket(req.hash_id, req.bucket_id, req.num_results)
 
 

@@ -49,6 +49,34 @@ button, input, select { font: inherit; color: inherit; }
 #model-name, #hydrus-name, #db-name { color: var(--text-dim); }
 #scope-count { color: var(--text-dim); font-size: 12px; }
 
+/* ===== Quant status hover panel ===== */
+.quant-group { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+#quant-panel {
+	position: absolute;
+	top: 100%;
+	right: 0;
+	z-index: 30;
+	background: var(--bg-panel);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	box-shadow: 0 6px 24px rgba(0,0,0,.5);
+	padding: 6px;
+	min-width: 340px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.quant-title {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: .05em;
+	color: var(--text-dim);
+	padding: 2px 4px;
+}
+.quant-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px; }
+.quant-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quant-row .hint { flex: none; min-width: 52px; text-align: right; white-space: nowrap; }
+
 /* ===== Tabs ===== */
 .tb-tabs {
 	gap: 2px;
