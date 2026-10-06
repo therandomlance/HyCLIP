@@ -17,6 +17,8 @@ const state = {
 	results: [],      // {hashId, dist}
 	selected: new Set(),
 	lastClicked: -1,
+	dragAnchor: null, // index where a drag-select started, null when not dragging
+	dragMoved: false, // set during a drag so the click that ends it is ignored
 	viewerIdx: -1,
 	bucketScope: "",  // "" = global
 };
@@ -59,20 +61,25 @@ function addPrompt(data = {}) {
 	};
 
 	const rm = document.createElement("button");
-	rm.className = "btn remove-btn"; rm.textContent = "✕"; rm.title = "Remove";
+	rm.className = "btn remove-btn"; rm.textContent = "✕";
+	rm.title = "Remove (clears the last remaining row)";
 	rm.onclick = () => {
-		if (state.prompts.length <= 1) return;
-		state.prompts.splice(state.prompts.indexOf(row), 1);
-		el.remove(); refreshPromptRemoveButtons(); refreshHasInput();
+		if (state.prompts.length > 1) {
+			state.prompts.splice(state.prompts.indexOf(row), 1);
+			el.remove();
+		} else {
+			// Lone row: clear it instead of leaving no input at all
+			row.text = ""; row.weight = 1.0; row.positive = true; row.enabled = true;
+			row.vec = null; row.vecFor = null;
+			text.value = ""; weight.value = "1"; chk.checked = true;
+			sign.textContent = "+"; sign.classList.remove("neg");
+			el.classList.remove("disabled");
+		}
+		refreshHasInput();
 	};
 
 	el.append(chk, text, weight, sign, rm);
 	$("#prompt-list").append(el);
-	refreshPromptRemoveButtons();
-}
-function refreshPromptRemoveButtons() {
-	const rows = $("#prompt-list").children;
-	for (const el of rows) el.querySelector(".remove-btn").style.visibility = rows.length > 1 ? "visible" : "hidden";
 }
 
 // ===== Tag rows + autocomplete =====
@@ -178,20 +185,25 @@ function addTag(data = {}) {
 	};
 
 	const rm = document.createElement("button");
-	rm.className = "btn remove-btn"; rm.textContent = "✕"; rm.title = "Remove";
+	rm.className = "btn remove-btn"; rm.textContent = "✕";
+	rm.title = "Remove (clears the last remaining row)";
 	rm.onclick = () => {
-		if (state.tags.length <= 1) return;
-		state.tags.splice(state.tags.indexOf(row), 1);
-		el.remove(); refreshTagRemoveButtons(); refreshHasInput();
+		if (state.tags.length > 1) {
+			state.tags.splice(state.tags.indexOf(row), 1);
+			el.remove();
+		} else {
+			// Lone row: clear it instead of leaving no input at all
+			row.tag = ""; row.weight = 1.0; row.positive = true; row.enabled = true;
+			row.vec = null; row.vecFor = null;
+			text.value = ""; weight.value = "1"; chk.checked = true;
+			sign.textContent = "+"; sign.classList.remove("neg");
+			el.classList.remove("disabled");
+		}
+		refreshHasInput();
 	};
 
 	el.append(chk, wrap, weight, sign, rm);
 	$("#tag-list").append(el);
-	refreshTagRemoveButtons();
-}
-function refreshTagRemoveButtons() {
-	const rows = $("#tag-list").children;
-	for (const el of rows) el.querySelector(".remove-btn").style.visibility = rows.length > 1 ? "visible" : "hidden";
 }
 
 // ===== Reference images =====
@@ -415,10 +427,26 @@ function displayResults(results) {
 		dist.className = "dist";
 		dist.textContent = `#${res.hashId} · dist ${res.dist.toFixed(4)}`;
 
+		img.draggable = false;
 		card.append(img, dist);
 		card.onclick = (e) => onCardClick(e, idx);
 		card.ondblclick = () => openViewer(idx);
-		card.oncontextmenu = (e) => { e.preventDefault(); showCtxMenu(e, res); };
+		card.oncontextmenu = (e) => { e.preventDefault(); showCtxMenu(e, res, idx); };
+		// Drag-select: press on a card, sweep over others to add them on top of the
+		// current selection. onCardClick skips the click that ends a drag.
+		card.onmousedown = (e) => {
+			if (e.button !== 0) return;
+			state.dragAnchor = idx;
+			state.dragMoved = false;
+		};
+		card.onmouseenter = (e) => {
+			if (state.dragAnchor === null || !(e.buttons & 1)) return;
+			state.dragMoved = true;
+			const [a, b] = [state.dragAnchor, idx].sort((x, y) => x - y);
+			for (let i = a; i <= b; i++) state.selected.add(state.results[i].hashId);
+			state.lastClicked = idx;
+			refreshSelectionUI();
+		};
 		$("#grid").append(card);
 	}
 }
@@ -436,6 +464,7 @@ function stepViewer(delta) {
 }
 
 function onCardClick(e, idx) {
+	if (state.dragMoved) { state.dragMoved = false; return; }
 	if (e.shiftKey && state.lastClicked >= 0) {
 		const [a, b] = [state.lastClicked, idx].sort((x, y) => x - y);
 		if (!e.ctrlKey && !e.metaKey) state.selected.clear();
@@ -471,76 +500,88 @@ function refreshSelectionUI() {
 	$("#selection-count").textContent = `${n} selected`;
 }
 
-// Populate the add/remove dropdowns on demand, only when the user opens them, so
-// bucket list/membership calls don't fire on every selection change.
-// ponytail: native dropdowns open before these async options resolve, so a slow
-// server can show just the placeholder on first open; localhost resolves fast.
-function lazyPopulate(el, fn) {
-	el.addEventListener("pointerdown", () => fn().catch(() => {}));
-	el.addEventListener("focus", () => fn().catch(() => {}));
-}
-
-async function populateAddSelect() {
-	const sel = $("#bucket-action-select");
-	if (sel.dataset.busy) return;
-	sel.dataset.busy = "1";
-	try {
-		const buckets = await api("/list_buckets");
-		sel.replaceChildren(new Option("Add to bucket…", ""));
-		for (const [id, name] of buckets) sel.append(new Option(name, id));
-	} finally {
-		delete sel.dataset.busy;
-	}
-}
-
-async function populateRemoveSelect() {
-	const sel = $("#bucket-remove-select");
-	if (sel.dataset.busy) return;
-	sel.dataset.busy = "1";
-	try {
-		sel.replaceChildren(new Option("Remove from bucket…", ""));
-		if (!state.selected.size) return;
-		const results = await Promise.allSettled(
-			[...state.selected].map((id) => api(`/get_bucket_membership?hash_id=${id}`))
-		);
-		// Drop failed lookups and images in no buckets — they can't constrain a removal
-		const lists = results.filter((r) => r.status === "fulfilled" && r.value.length).map((r) => r.value);
-		if (!lists.length) return;
-		const common = lists.reduce((a, b) => a.filter((x) => b.includes(x)));
-		if (!common.length) return;
-		const buckets = await api("/list_buckets");
-		for (const [id, name] of buckets) if (common.includes(id)) sel.append(new Option(name, id));
-	} finally {
-		delete sel.dataset.busy;
-	}
-}
-
 // ===== Context menu =====
-function showCtxMenu(e, res) {
-	const menu = $("#ctx-menu");
-	menu.replaceChildren();
+// Multi-select aware: right-clicking an unselected card selects just it first,
+// then every action applies to the whole selection. Bucket add/remove is a
+// hover flyout (tree) under the two bucket branches.
+function ctxBucketAction(bucketId, name, add) {
+	const ids = [...state.selected];
+	if (!ids.length) return;
+	const verb = add ? "Add" : "Remove";
+	const prep = add ? "to" : "from";
+	if (!confirm(`${verb} ${ids.length} selected image(s) ${prep} "${name}"?`)) return;
+	(add
+		? post("/insert_into_bucket", { bucket_id: Number(bucketId), hash_ids: ids })
+		: post("/remove_from_bucket", { bucket_id: Number(bucketId), hash_ids: ids })
+	).then((r) => {
+		status(add
+			? `Added ${r.inserted} image(s) to "${name}" (visible in its searches after server restart if it was searched before)`
+			: `Removed ${r.removed} image(s) from "${name}"`);
+		clearSelection();
+		refreshBuckets().catch(() => {});
+	}).catch((e) => status(`Error: ${e.message}`));
+}
+
+function buildCtxMenu(items, container) {
+	for (const [label, fn, children] of items) {
+		if (children) {
+			const wrap = document.createElement("div");
+			wrap.className = "ctx-item has-sub";
+			const b = document.createElement("button");
+			b.textContent = label;
+			const sub = document.createElement("div");
+			sub.className = "ctx-sub";
+			buildCtxMenu(children, sub);
+			wrap.append(b, sub);
+			container.append(wrap);
+		} else {
+			const b = document.createElement("button");
+			b.textContent = label;
+			b.onclick = () => { $("#ctx-menu").hidden = true; fn(); };
+			container.append(b);
+		}
+	}
+}
+
+async function showCtxMenu(e, res, idx) {
+	if (!state.selected.has(res.hashId)) {
+		state.selected.clear();
+		state.selected.add(res.hashId);
+		state.lastClicked = idx;
+		refreshSelectionUI();
+	}
+	const ids = [...state.selected];
+	const n = ids.length;
 
 	const items = [
-		["Search using this image", async () => {
-			try { await addRefById(res.hashId); } catch (err) { status(`Error: ${err.message}`); }
+		[n === 1 ? "Search using this image" : `Use ${n} selected as references`, async () => {
+			for (const id of ids) {
+				try { await addRefById(id); } catch (err) { status(`Error on #${id}: ${err.message}`); }
+			}
 		}],
-		["View full size", () => openViewer(state.results.indexOf(res))],
-		["Copy file path", async () => {
+		[n === 1 ? "Copy file path" : `Copy ${n} file paths`, async () => {
 			try {
-				const { path } = await api(`/file_path?hash_id=${res.hashId}`);
-				await navigator.clipboard.writeText(path);
-				status("Path copied");
+				const paths = await Promise.all(ids.map(async (id) => (await api(`/file_path?hash_id=${id}`)).path));
+				await navigator.clipboard.writeText(paths.join("\n"));
+				status(`${paths.length} path(s) copied`);
 			} catch (err) { status(`Error: ${err.message}`); }
 		}],
 	];
+	if (n === 1) items.push(["View full size", () => openViewer(idx)]);
 
-	for (const [label, fn] of items) {
-		const b = document.createElement("button");
-		b.textContent = label;
-		b.onclick = () => { menu.hidden = true; fn(); };
-		menu.append(b);
-	}
+	try {
+		const buckets = await api("/list_buckets");
+		if (buckets.length) {
+			items.push(["Add to bucket", null, buckets.map(([id, name]) => [name, () => ctxBucketAction(id, name, true)])]);
+			items.push(["Remove from bucket", null, buckets.map(([id, name]) => [name, () => ctxBucketAction(id, name, false)])]);
+		}
+	} catch {}
 
+	const menu = $("#ctx-menu");
+	menu.replaceChildren();
+	buildCtxMenu(items, menu);
+	// Flip the flyouts left when the menu is opened on the right half of the screen
+	menu.classList.toggle("left-open", e.clientX > innerWidth / 2);
 	menu.hidden = false;
 	menu.style.left = Math.min(e.clientX, innerWidth - 220) + "px";
 	menu.style.top = Math.min(e.clientY, innerHeight - 150) + "px";
@@ -632,38 +673,9 @@ async function init() {
 
 	// Selection actions
 	$("#clear-selection").onclick = clearSelection;
-	$("#use-as-refs").onclick = async () => {
-		for (const id of state.selected) {
-			try { await addRefById(id); } catch (e) { status(`Error on #${id}: ${e.message}`); }
-		}
-		clearSelection();
-	};
-	lazyPopulate($("#bucket-action-select"), populateAddSelect);
-	lazyPopulate($("#bucket-remove-select"), populateRemoveSelect);
-	$("#bucket-action-select").onchange = async (e) => {
-		const bucketId = e.target.value;
-		const name = e.target.selectedOptions[0]?.textContent ?? `bucket ${bucketId}`;
-		e.target.value = "";
-		if (!bucketId || !state.selected.size) return;
-		if (!confirm(`Add ${state.selected.size} selected image(s) to "${name}"?`)) return;
-		try {
-			const r = await post("/insert_into_bucket", { bucket_id: Number(bucketId), hash_ids: [...state.selected] });
-			status(`Added ${r.inserted} image(s) to bucket (visible in its searches after server restart if it was searched before)`);
-			clearSelection();
-		} catch (err) { status(`Error: ${err.message}`); }
-	};
-	$("#bucket-remove-select").onchange = async (e) => {
-		const bucketId = e.target.value;
-		const name = e.target.selectedOptions[0]?.textContent ?? `bucket ${bucketId}`;
-		e.target.value = "";
-		if (!bucketId || !state.selected.size) return;
-		if (!confirm(`Remove ${state.selected.size} selected image(s) from "${name}"?`)) return;
-		try {
-			const r = await post("/remove_from_bucket", { bucket_id: Number(bucketId), hash_ids: [...state.selected] });
-			status(`Removed ${r.removed} image(s) from "${name}"`);
-			clearSelection();
-		} catch (err) { status(`Error: ${err.message}`); }
-	};
+	// A mouseup anywhere ends a drag-select sweep (the click that may follow is
+	// swallowed by onCardClick via state.dragMoved).
+	document.addEventListener("mouseup", () => { state.dragAnchor = null; });
 
 	// Overlay / context menu dismissal
 	$("#viewer-prev").onclick = (e) => { e.stopPropagation(); stepViewer(-1); };
