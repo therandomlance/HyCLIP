@@ -189,6 +189,38 @@ def main():
 
 	assert client.post("/search_id", json={"hash_id": 99999}).status_code == 404
 
+	# ---- hydrus-deleted pruning + Delete -> trash, against a fake hydrus ----
+	class FakeHydrus:
+		deleted = {500}
+		calls = []
+		def get_file_metadata(self, file_ids, **_):
+			return {"metadata": [{"file_id": X, "is_deleted": X in self.deleted} for X in file_ids]}
+		def delete_files(self, file_ids, **_):
+			self.calls.append(("delete", list(file_ids)))
+	real_hy = api.ORCH.HY
+	api.ORCH.HY = FakeHydrus()
+	api.ORCH.CFG.API_KEY = "fake"  # unlocks _assert_hydrus + pruning; never reaches a real hydrus
+	try:
+		for X in (500, 501):
+			api.ORCH.DB.insert_embedding(X, text_emb)
+		api.ORCH.DB.commit()
+		api.ORCH.alive_checked.clear()
+
+		r = client.post("/search", json={"embedding": text_emb, "num_results": 50})
+		ids = [h for h, _ in r.json()]
+		assert r.status_code == 200 and 500 not in ids and 501 in ids, f"deleted file should be pruned from results: {ids}"
+		assert not api.ORCH.DB.exists_hash_id(500), "hydrus-deleted file should leave embeddings"
+		assert not api.ORCH.DB.exists_trash(500), "search-time pruning must not add trash rows"
+
+		r = client.post("/delete_files", json={"hash_ids": [501]})
+		assert r.status_code == 200 and r.json()["trashed"] == 1, r.json()
+		assert FakeHydrus.calls == [("delete", [501])], "delete_files should hit hydrus"
+		assert not api.ORCH.DB.exists_hash_id(501) and api.ORCH.DB.exists_trash(501), "Delete should move to trash"
+	finally:
+		api.ORCH.HY = real_hy
+		api.ORCH.CFG.API_KEY = None
+		api.ORCH.alive_checked.clear()
+
 	# ---- quant: status, manual quantize, clear; search never auto-quantizes ----
 	qs = client.get("/quant_status").json()
 	assert isinstance(qs, list) and qs[0]["name"] == "global", "quant_status should list global first"

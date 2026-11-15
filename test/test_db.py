@@ -191,6 +191,27 @@ def main():
 	assert db.get_num_embeddings() == len(images) - 2, "count after removal wrong"
 	assert db.get_bucket_membership(hash_ids[-1]) == [], "removed hash should have no bucket memberships"
 
+	# ---- trash: embedding + bucket membership move to `trash`, gone everywhere else ----
+	victim = hash_ids[3]
+	if not db.exists_bucket_member(bucket_id, victim):
+		db.add_to_bucket(bucket_id, [victim])
+	emb_before = db.get_embedding(victim)
+	n_before = db.get_num_embeddings()
+	assert db.trash_embeddings([victim, 424242]) == [victim], "trash should skip un-ingested ids"
+	assert not db.exists_hash_id(victim), "trashed embedding should leave embeddings"
+	assert db.get_bucket_membership(victim) == [], "trashed hash should leave its buckets"
+	assert db.get_num_embeddings() == n_before - 1, "count after trash wrong"
+	assert db.exists_trash(victim) and db.get_num_trash() == 1, "trash row missing"
+	blob, buckets, reason = db.DB.execute("SELECT embedding, buckets, reason FROM trash WHERE hash_id = ?", [victim]).fetchone()
+	assert db.blob2list(blob) == emb_before, "trash should keep the original embedding"
+	assert str(bucket_id) in buckets.split(","), "trash should record bucket membership"
+	assert reason == "hyclip_delete", "default trash reason"
+
+	# remove_embeddings: silent removal, no trash row
+	victim2 = hash_ids[2]
+	assert db.remove_embeddings([victim2, 424242]) == [victim2]
+	assert not db.exists_hash_id(victim2) and not db.exists_trash(victim2), "remove_embeddings must not trash"
+
 	db.remove_bucket(bucket_id)
 	assert not db.exists_bucket(bucket_id), "bucket should be removed"
 	assert not db.bucket_is_init(bucket_id), "temp bucket should be gone"

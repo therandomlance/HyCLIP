@@ -418,8 +418,10 @@ async function performSearch() {
 function displayResults(results, keepScroll = false) {
 	const scroll = $("#grid").scrollTop;
 	state.results = results;
-	clearSelection();
+	// Clear the old cards first: refreshSelectionUI indexes state.results by each card's idx,
+	// and old cards past the end of a shorter list would throw
 	$("#grid").replaceChildren();
+	clearSelection();
 	$("#select-all").hidden = !results.length;
 	$("#results-info").textContent = results.length ? `${results.length} result(s)` : "No results";
 
@@ -605,7 +607,7 @@ function clearSelection() {
 
 function refreshSelectionUI() {
 	for (const card of $("#grid").children)
-		card.classList.toggle("selected", state.selected.has(state.results[card.dataset.idx].hashId));
+		card.classList.toggle("selected", state.selected.has(state.results[card.dataset.idx]?.hashId));
 
 	const n = state.selected.size;
 	$("#selection-bar").hidden = n === 0;
@@ -628,7 +630,8 @@ function refreshRemoveToggle() {
 	wrap.hidden = !state.bucketScope;
 	const name = scopeName();
 	wrap.title = `When checked, images you Archive, Delete or Defer are also removed from the bucket you're currently searching ("${name}"), and their cards disappear from these results.\n`
-		+ "This only happens after hydrus accepts the action. Images stay in hyclip's global index and in any other buckets. Open in Hydrus never removes anything.";
+		+ "This only happens after hydrus accepts the action. Archived/deferred images stay in hyclip's global index and in any other buckets. "
+		+ "Delete always removes images from hyclip (moved to its trash table), whether or not this is checked. Open in Hydrus never removes anything.";
 }
 
 async function openInHydrus(ids) {
@@ -660,10 +663,12 @@ async function runFileAction(kind, ids) {
 	try {
 		const r = await post(FILE_ACTIONS[kind].path, body);
 		let msg = `${FILE_ACTIONS[kind].past} ${r.count} image(s)` + (r.tag ? ` with "${r.tag}"` : "");
-		if (removeFrom !== null) {
+		// Delete moves embeddings to hyclip's trash table, so those cards go regardless of the toggle
+		if (kind === "delete") msg += ` (${r.trashed} moved to hyclip trash)`;
+		else if (removeFrom !== null) msg += `, removed from "${scopeName()}"`;
+		if (kind === "delete" || removeFrom !== null) {
 			const gone = new Set(ids);
 			displayResults(state.results.filter((x) => !gone.has(x.hashId)), true);
-			msg += `, removed from "${scopeName()}"`;
 			updateScopeCount();
 		}
 		status(msg);

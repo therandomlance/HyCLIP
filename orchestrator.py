@@ -5,6 +5,7 @@ from model import HyCLIP_Model
 import hydrus_api
 from hydrus_api import TagAction
 import os
+import time
 
 class Orchestrator():
 	def __init__(self):
@@ -14,6 +15,9 @@ class Orchestrator():
 
 		# vector_init is per-connection; remember which scopes this connection has init'd
 		self.init_scopes = set()
+
+		# hash_id -> last time hydrus said it's not deleted, so repeat searches skip the check
+		self.alive_checked = {}
 
 		self.connect_hydrus()
 
@@ -130,6 +134,10 @@ class Orchestrator():
 			self.HY.archive_files(file_ids=hash_ids)
 		elif action == "delete":
 			self.HY.delete_files(file_ids=hash_ids, reason="hyclip")
+			# Embedding + bucket membership move to the trash table (this drops them from every bucket)
+			trashed = self.DB.trash_embeddings(hash_ids, reason="hyclip_delete")
+			return {"action": action, "count": len(hash_ids), "tag": None, "trashed": len(trashed),
+				"removed_from_bucket": len(trashed) if remove_from_bucket is not None else 0}
 		elif action == "defer":
 			tag = tag or self.CFG.DEFER_TAG
 			self.HY.add_tags(
@@ -144,6 +152,45 @@ class Orchestrator():
 			self.DB.remove_from_bucket(remove_from_bucket, hash_ids)
 			removed = len(hash_ids)
 		return {"action": action, "count": len(hash_ids), "tag": tag, "removed_from_bucket": removed}
+
+
+	# ===== Search =====
+	ALIVE_TTL = 300  # seconds a "not deleted in hydrus" check stays valid
+
+	def search(self, embedding:list[float], num_results:int=100, bucket_id:int|None=None) -> list[tuple[int, float]]:
+		"""Search a scope, dropping (and removing from hyclip) results hydrus has trashed/deleted.
+		No backfill: pruned results just shrink the result list."""
+		self.ensure_init(bucket_id)
+		if bucket_id is None:
+			results = self.DB.search_embedding(embedding, num_results)
+		else:
+			results = self.DB.search_embedding_bucket(embedding, bucket_id, num_results)
+		gone = self.prune_deleted([hash_id for hash_id, _ in results])
+		return [R for R in results if R[0] not in gone]
+
+	def prune_deleted(self, hash_ids:list[int]) -> set[int]:
+		"""Remove embeddings hydrus reports as trashed or deleted (no trash row: those are hyclip
+		deletions only). Best effort: no API key / hydrus unreachable -> nothing pruned."""
+		now = time.monotonic()
+		todo = [X for X in hash_ids if now - self.alive_checked.get(X, -self.ALIVE_TTL) >= self.ALIVE_TTL]
+		if not todo or not self.CFG.API_KEY:
+			return set()
+		try:
+			meta = self.HY.get_file_metadata(file_ids=todo).get("metadata", [])
+		except Exception as e:
+			print(f"prune_deleted: hydrus check skipped ({e.__class__.__name__})")
+			return set()
+
+		gone = set()
+		for M in meta:
+			if M.get("is_deleted"):
+				gone.add(M["file_id"])
+			else:
+				self.alive_checked[M["file_id"]] = now
+		if gone:
+			removed = self.DB.remove_embeddings(sorted(gone))
+			print(f"prune_deleted: removed {len(removed)} file(s) deleted in hydrus: {removed}")
+		return gone
 
 
 	# ===== Image Ingest =====

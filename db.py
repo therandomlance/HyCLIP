@@ -2,6 +2,7 @@ import sqlite3 as sql
 import importlib.resources
 import os
 import array
+import time
 
 class HyCLIP_DB:
 	def __init__(self, model_dims:int, quant:str, filename="hyclip.db", verbose:bool=True):
@@ -42,6 +43,16 @@ class HyCLIP_DB:
 			);
 
 			CREATE INDEX IF NOT EXISTS tag_index ON tags(tag);
+
+			-- Files deleted from hydrus through hyclip; kept for training/analytics.
+			-- buckets = comma-separated bucket_ids the file was in when trashed.
+			CREATE TABLE IF NOT EXISTS trash (
+				hash_id INTEGER PRIMARY KEY,
+				embedding BLOB,
+				buckets TEXT,
+				reason TEXT,
+				trashed_at INTEGER
+			);
 		''')
 		self.commit()
 
@@ -281,6 +292,35 @@ class HyCLIP_DB:
 		self._delete("embeddings", ("hash_id", hash_id))
 
 		self.commit()
+
+	def remove_embeddings(self, hash_ids:list[int]) -> list[int]:
+		"""remove_embedding for every hash_id that exists; returns the ones removed."""
+		removed = [X for X in hash_ids if self.exists_hash_id(X)]
+		for hash_id in removed:
+			self.remove_embedding(hash_id)
+		return removed
+
+	def trash_embeddings(self, hash_ids:list[int], reason:str="hyclip_delete") -> list[int]:
+		"""Move embeddings (+ their bucket membership) into `trash`, then remove them everywhere else.
+		Un-ingested hash_ids are skipped. Returns the hash_ids trashed."""
+		trashed = []
+		for hash_id in hash_ids:
+			row = self.DB.execute("SELECT embedding FROM embeddings WHERE hash_id = ?", [hash_id]).fetchone()
+			if row is None:
+				continue
+			buckets = ",".join(str(X) for X in self.get_bucket_membership(hash_id))
+			self.DB.execute(
+				"INSERT OR REPLACE INTO trash (hash_id, embedding, buckets, reason, trashed_at) VALUES (?, ?, ?, ?, ?)",
+				[hash_id, row[0], buckets, reason, int(time.time())])
+			self.remove_embedding(hash_id)  # commits
+			trashed.append(hash_id)
+		return trashed
+
+	def exists_trash(self, hash_id:int) -> bool:
+		return self._exists("trash", ("hash_id", hash_id))
+
+	def get_num_trash(self) -> int:
+		return self.qe("SELECT COUNT(*) FROM trash")
 
 	def remove_bucket(self, bucket_id:int):
 		self._assert_bucket_id(bucket_id)

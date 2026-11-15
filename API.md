@@ -400,6 +400,7 @@ Hydrus proxy errors (thumbnail/file/file_path/resolve_hash) are forwarded with H
 ## Gotchas
 
 - `insert_into_bucket` rebuilds a bucket's temp search table if it was already initialized and drops its now-orphaned quant cache, so the bucket reads as not quantized (red) until you re-quantize it. Removing a member keeps the quant table, so the bucket reads as stale (yellow).
+- Search prunes files hydrus reports as trashed or deleted: `search*` endpoints check results against hydrus (when `API_KEY` is set; each file re-checked at most every 5 min), remove deleted ones from hyclip (embeddings + buckets, **no** trash row — the `trash` table is only for hyclip Delete), and drop them from the response (no backfill, so fewer than `num_results` can come back). Hydrus unreachable → results are returned unpruned.
 - Search never quantizes. `search`/`search_bucket` use a scope's quantized index whenever its quant table exists, stale or not, otherwise a full scan. Row count only affects the status color (yellow = stale), not the search path. Quantize/clear manually from the topbar hover panel (`POST /quantize` / `POST /clear_quant`).
 
 ## Web UI / Hydrus proxy
@@ -469,7 +470,7 @@ Add files to the hydrus page named `hyclip` and focus it. If no such page exists
 **Request** `{"hash_ids": [1, 2, 3]}` → **Response** `{"page": "hyclip", "added": 3, "created": false}`
 
 ### `POST /archive_files` · `POST /delete_files` · `POST /defer_files`
-Selection actions from the search tab. `archive_files` archives (removes from inbox), `delete_files` sends to the hydrus trash (hyclip embeddings are kept), `defer_files` adds `tag` (default config `DEFER_TAG`, `hyclip:defer`) on `TAG_SERVICE_KEY` (else **503**). Optional `remove_from_bucket` also removes the files from that bucket after the hydrus call succeeds (**404** if the bucket doesn't exist).
+Selection actions from the search tab. `archive_files` archives (removes from inbox), `delete_files` sends to the hydrus trash and moves the hyclip embeddings (with their bucket membership) to the `trash` table, removing them from every bucket (response adds `trashed`), `defer_files` adds `tag` (default config `DEFER_TAG`, `hyclip:defer`) on `TAG_SERVICE_KEY` (else **503**). Optional `remove_from_bucket` also removes the files from that bucket after the hydrus call succeeds (**404** if the bucket doesn't exist).
 
 **Request**
 ```json
