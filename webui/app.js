@@ -21,6 +21,15 @@ const state = {
 	dragMoved: false, // set during a drag so the click that ends it is ignored
 	viewerIdx: -1,
 	bucketScope: "",  // "" = global
+	buckets: [],      // [[id, name]] from /list_buckets
+	cfg: {},          // /get_config snapshot (DEFER_TAG etc.)
+	meta: new Map(),  // hashId -> /file_metadata payload (viewer panel cache)
+};
+
+// ponytail: localStorage only for per-viewer UI prefs; wrapped since it can throw
+const pref = {
+	get(k, d) { try { const v = localStorage.getItem("hyclip." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+	set(k, v) { try { localStorage.setItem("hyclip." + k, JSON.stringify(v)); } catch {} },
 };
 
 // ===== Prompt rows =====
@@ -406,11 +415,12 @@ async function performSearch() {
 }
 
 // ===== Results grid =====
-function displayResults(results) {
+function displayResults(results, keepScroll = false) {
+	const scroll = $("#grid").scrollTop;
 	state.results = results;
 	clearSelection();
 	$("#grid").replaceChildren();
-	$("#grid").scrollTop = 0;
+	$("#select-all").hidden = !results.length;
 	$("#results-info").textContent = results.length ? `${results.length} result(s)` : "No results";
 
 	for (const [idx, res] of results.entries()) {
@@ -449,12 +459,114 @@ function displayResults(results) {
 		};
 		$("#grid").append(card);
 	}
+	$("#grid").scrollTop = keepScroll ? scroll : 0;
 }
 
 function openViewer(idx) {
 	state.viewerIdx = idx;
-	$("#overlay-img").src = `/file?hash_id=${state.results[idx].hashId}`;
+	const hashId = state.results[idx].hashId;
+	$("#overlay-img").src = `/file?hash_id=${hashId}`;
 	$("#overlay").hidden = false;
+	loadViewerMeta(hashId);
+}
+
+function closeViewer() {
+	$("#overlay").hidden = true;
+	$("#overlay-img").src = "";
+	hideCtxMenu();
+}
+
+// ===== Viewer metadata panel =====
+async function loadViewerMeta(hashId) {
+	const body = $("#viewer-meta-body");
+	let meta = state.meta.get(hashId);
+	if (!meta) {
+		body.replaceChildren(metaHint("Loading metadata…"));
+		try {
+			meta = await api(`/file_metadata?hash_id=${hashId}`);
+			state.meta.set(hashId, meta);
+		} catch (e) {
+			if (state.results[state.viewerIdx]?.hashId === hashId) body.replaceChildren(metaHint(`Metadata unavailable: ${e.message}`));
+			return;
+		}
+	}
+	// Stepping fast: only render the file still on screen
+	if ($("#overlay").hidden || state.results[state.viewerIdx]?.hashId !== hashId) return;
+	renderViewerMeta(meta, hashId);
+}
+
+function metaHint(text) {
+	const d = document.createElement("div");
+	d.className = "hint";
+	d.textContent = text;
+	return d;
+}
+
+function metaSection(title, entries, render) {
+	const h = document.createElement("h3");
+	h.textContent = `${title} (${entries.length})`;
+	const list = document.createElement("div");
+	list.className = "meta-list";
+	if (!entries.length) list.append(metaHint("none"));
+	for (const e of entries) list.append(render(e));
+	return [h, list];
+}
+
+function metaItem(menuItems) {
+	const d = document.createElement("div");
+	d.className = "meta-item";
+	d.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); openMenu(e, menuItems); };
+	return d;
+}
+
+function renderViewerMeta(meta, hashId) {
+	const head = document.createElement("div");
+	head.className = "hint";
+	head.textContent = `#${hashId}` + (meta.hash ? ` · ${meta.hash.slice(0, 16)}…` : "");
+	head.title = meta.hash ?? "";
+
+	const tags = metaSection("Tags", meta.tags, (tag) => {
+		const d = metaItem([
+			["Copy tag", () => copyText(tag, "Tag copied")],
+			["Add tag to hyclip", () => addTagToHyclip(tag)],
+		]);
+		d.textContent = tag;
+		return d;
+	});
+
+	const notes = metaSection("Notes", Object.entries(meta.notes), ([name, text]) => {
+		const d = metaItem([["Copy note", () => copyText(text, "Note copied")]]);
+		const n = document.createElement("div");
+		n.className = "meta-note-name"; n.textContent = name;
+		const t = document.createElement("div");
+		t.className = "meta-note-text"; t.textContent = text;
+		d.append(n, t);
+		return d;
+	});
+
+	const urls = metaSection("Known URLs", meta.urls, (url) => {
+		const d = metaItem([["Copy link", () => copyText(url, "Link copied")]]);
+		const a = document.createElement("a");
+		a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = url;
+		d.append(a);
+		return d;
+	});
+
+	$("#viewer-meta-body").replaceChildren(head, ...tags, ...notes, ...urls);
+}
+
+async function copyText(text, msg) {
+	try { await navigator.clipboard.writeText(text); status(msg); }
+	catch (e) { status(`Copy failed: ${e.message}`); }
+}
+
+async function addTagToHyclip(tag) {
+	status(`Generating tag embedding for "${tag}"…`);
+	try {
+		const r = await post("/make_tag", { tag, search_limit: 1000 });
+		await loadTagList();
+		status(`Tag "${r.tag}" stored from ${r.ingested}/${r.matched} ingested file(s)`);
+	} catch (e) { status(`Tag "${tag}": ${e.message}`); }
 }
 
 function stepViewer(delta) {
@@ -497,7 +609,65 @@ function refreshSelectionUI() {
 
 	const n = state.selected.size;
 	$("#selection-bar").hidden = n === 0;
+	$("#selection-actions").hidden = n === 0;
 	$("#selection-count").textContent = `${n} selected`;
+}
+
+function selectAll() {
+	for (const r of state.results) state.selected.add(r.hashId);
+	refreshSelectionUI();
+}
+
+// ===== Hydrus file actions (selection) =====
+function scopeName() {
+	return state.buckets.find(([id]) => String(id) === String(state.bucketScope))?.[1] ?? "";
+}
+
+function refreshRemoveToggle() {
+	const wrap = $("#act-remove-wrap");
+	wrap.hidden = !state.bucketScope;
+	const name = scopeName();
+	wrap.title = `When checked, images you Archive, Delete or Defer are also removed from the bucket you're currently searching ("${name}"), and their cards disappear from these results.\n`
+		+ "This only happens after hydrus accepts the action. Images stay in hyclip's global index and in any other buckets. Open in Hydrus never removes anything.";
+}
+
+async function openInHydrus(ids) {
+	if (!ids.length) return;
+	try {
+		const r = await post("/open_in_hydrus", { hash_ids: ids });
+		status(`Sent ${r.added} image(s) to ${r.created ? "new " : ""}"${r.page}" page in hydrus`);
+	} catch (e) { status(`Open in Hydrus: ${e.message}`); }
+}
+
+const FILE_ACTIONS = {
+	archive: { path: "/archive_files", past: "Archived" },
+	delete: { path: "/delete_files", past: "Trashed" },
+	defer: { path: "/defer_files", past: "Deferred" },
+};
+
+async function runFileAction(kind, ids) {
+	if (!ids.length) return;
+	const body = { hash_ids: ids };
+	if (kind === "delete" && !confirm(`Send ${ids.length} image(s) to the hydrus trash?`)) return;
+	if (kind === "defer") {
+		const tag = prompt(`Defer tag for ${ids.length} image(s):`, state.cfg.DEFER_TAG ?? "hyclip:defer");
+		if (tag === null || !tag.trim()) return;
+		body.tag = tag.trim();
+	}
+	const removeFrom = state.bucketScope && $("#act-remove-bucket").checked ? Number(state.bucketScope) : null;
+	if (removeFrom !== null) body.remove_from_bucket = removeFrom;
+
+	try {
+		const r = await post(FILE_ACTIONS[kind].path, body);
+		let msg = `${FILE_ACTIONS[kind].past} ${r.count} image(s)` + (r.tag ? ` with "${r.tag}"` : "");
+		if (removeFrom !== null) {
+			const gone = new Set(ids);
+			displayResults(state.results.filter((x) => !gone.has(x.hashId)), true);
+			msg += `, removed from "${scopeName()}"`;
+			updateScopeCount();
+		}
+		status(msg);
+	} catch (e) { status(`${kind}: ${e.message}`); }
 }
 
 // ===== Context menu =====
@@ -568,6 +738,14 @@ async function showCtxMenu(e, res, idx) {
 		}],
 	];
 	if (n === 1) items.push(["View full size", () => openViewer(idx)]);
+	if (hyclip.hydrus === "ok") {
+		items.push(["Open in Hydrus", () => openInHydrus(ids)]);
+		items.push(["Hydrus", null, [
+			["Archive", () => runFileAction("archive", ids)],
+			["Delete", () => runFileAction("delete", ids)],
+			["Defer", () => runFileAction("defer", ids)],
+		]]);
+	}
 
 	try {
 		const buckets = await api("/list_buckets");
@@ -577,6 +755,12 @@ async function showCtxMenu(e, res, idx) {
 		}
 	} catch {}
 
+	openMenu(e, items);
+}
+
+function hideCtxMenu() { $("#ctx-menu").hidden = true; }
+
+function openMenu(e, items) {
 	const menu = $("#ctx-menu");
 	menu.replaceChildren();
 	buildCtxMenu(items, menu);
@@ -599,6 +783,7 @@ async function updateScopeCount() {
 
 async function refreshBuckets() {
 	const buckets = await api("/list_buckets");
+	state.buckets = buckets;
 
 	const scope = $("#scope-select");
 	const prev = state.bucketScope;
@@ -607,6 +792,7 @@ async function refreshBuckets() {
 	scope.value = [...scope.options].some((o) => o.value === String(prev)) ? prev : "";
 	state.bucketScope = scope.value;
 	setScope(state.bucketScope);
+	refreshRemoveToggle();
 
 	updateScopeCount();
 }
@@ -614,6 +800,7 @@ async function refreshBuckets() {
 // ===== Init =====
 async function init() {
 	const cfg = await api("/get_config").catch(() => ({}));
+	state.cfg = cfg;
 
 	addPrompt();
 	addTag();
@@ -653,7 +840,7 @@ async function init() {
 	$("#fit-select").onchange = () => {
 		$("#grid").classList.toggle("fit", $("#fit-select").value === "fit");
 	};
-	$("#scope-select").onchange = (e) => { state.bucketScope = e.target.value; setScope(state.bucketScope); updateScopeCount(); };
+	$("#scope-select").onchange = (e) => { state.bucketScope = e.target.value; setScope(state.bucketScope); refreshRemoveToggle(); updateScopeCount(); };
 
 	// Reference image inputs
 	$("#ref-file-input").onchange = (e) => { addRefFiles(e.target.files); e.target.value = ""; };
@@ -673,6 +860,21 @@ async function init() {
 
 	// Selection actions
 	$("#clear-selection").onclick = clearSelection;
+	$("#select-all").onclick = selectAll;
+	const sel = () => [...state.selected];
+	$("#act-open").onclick = () => openInHydrus(sel());
+	$("#act-archive").onclick = () => runFileAction("archive", sel());
+	$("#act-delete").onclick = () => runFileAction("delete", sel());
+	$("#act-defer").onclick = () => runFileAction("defer", sel());
+	$("#act-remove-bucket").checked = pref.get("removeFromBucket", false);
+	$("#act-remove-bucket").onchange = (e) => pref.set("removeFromBucket", e.target.checked);
+
+	// Viewer metadata panel: clicks inside it must not close the overlay
+	const metaPanel = $("#viewer-meta");
+	metaPanel.classList.toggle("collapsed", pref.get("viewerMetaCollapsed", false));
+	metaPanel.onclick = (e) => e.stopPropagation();
+	const toggleMeta = () => pref.set("viewerMetaCollapsed", metaPanel.classList.toggle("collapsed"));
+	$("#viewer-meta-toggle").onclick = (e) => { e.stopPropagation(); toggleMeta(); };
 	// A mouseup anywhere ends a drag-select sweep (the click that may follow is
 	// swallowed by onCardClick via state.dragMoved).
 	document.addEventListener("mouseup", () => { state.dragAnchor = null; });
@@ -680,17 +882,24 @@ async function init() {
 	// Overlay / context menu dismissal
 	$("#viewer-prev").onclick = (e) => { e.stopPropagation(); stepViewer(-1); };
 	$("#viewer-next").onclick = (e) => { e.stopPropagation(); stepViewer(1); };
-	$("#overlay").onclick = () => { $("#overlay").hidden = true; $("#overlay-img").src = ""; };
+	$("#overlay").onclick = closeViewer;
 	document.addEventListener("click", (e) => {
-		if (!$("#ctx-menu").contains(e.target)) $("#ctx-menu").hidden = true;
+		if (!$("#ctx-menu").contains(e.target)) hideCtxMenu();
 	});
 	document.addEventListener("keydown", (e) => {
 		if (!$("#overlay").hidden) {
 			if (e.key === "ArrowLeft") stepViewer(-1);
 			else if (e.key === "ArrowRight") stepViewer(1);
-			else if (e.key === "Escape") $("#overlay").hidden = true;
+			else if (e.key === "Escape") { if (!$("#ctx-menu").hidden) hideCtxMenu(); else closeViewer(); }
+			else if (e.key === "i" || e.key === "I") toggleMeta();
 			else return;
 			e.preventDefault();
+			return;
+		}
+		const typing = e.target.closest?.("input, textarea, select, [contenteditable]");
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && !typing && state.results.length) {
+			e.preventDefault();
+			selectAll();
 			return;
 		}
 		if (e.key === "Escape") {

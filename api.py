@@ -83,6 +83,11 @@ class AddHashesToBucketRequest(BaseModel):
 	bucket_id: int
 	hashes: list[str]
 
+class FileActionRequest(BaseModel):
+	hash_ids: list[int]
+	tag: str | None = None                 # defer only; falls back to ORCH.CFG.DEFER_TAG
+	remove_from_bucket: int | None = None  # also drop the files from this bucket on success
+
 class MakeTagRequest(BaseModel):
 	tag: str
 	search_limit: int = 1000
@@ -359,6 +364,47 @@ def resolve_hash(hash: str):
 	
 	file_id = meta[0]["file_id"]
 	return {"hash_id": file_id, "ingested": ORCH.DB.exists_hash_id(file_id)}
+
+@app.get("/file_metadata")
+def file_metadata(hash_id: int):
+	_assert_hydrus()
+	try:
+		return ORCH.file_metadata(hash_id)
+	except LookupError as e:
+		raise HTTPException(status_code=404, detail=str(e))
+	except hydrus_api.APIError as e:
+		raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
+
+@app.post("/open_in_hydrus")
+def open_in_hydrus(req: FileActionRequest):
+	_assert_hydrus()
+	try:
+		return ORCH.open_in_hydrus(req.hash_ids)
+	except hydrus_api.APIError as e:
+		raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
+
+def _file_action(action: str, req: FileActionRequest):
+	_assert_hydrus()
+	if req.remove_from_bucket is not None:
+		_assert_bucket_id(req.remove_from_bucket)
+	try:
+		return ORCH.file_action(action, req.hash_ids, req.tag, req.remove_from_bucket)
+	except hydrus_api.APIError as e:
+		raise HTTPException(status_code=e.response.status_code, detail="hydrus: " + e.response.text)
+
+@app.post("/archive_files")
+def archive_files(req: FileActionRequest):
+	return _file_action("archive", req)
+
+@app.post("/delete_files")
+def delete_files(req: FileActionRequest):
+	"""Sends files to the hydrus trash; their hyclip embeddings are kept."""
+	return _file_action("delete", req)
+
+@app.post("/defer_files")
+def defer_files(req: FileActionRequest):
+	_assert_tag_service()
+	return _file_action("defer", req)
 
 @app.post("/eval_image_upload")
 async def eval_image_upload(request: Request, hash_id: int | None = None):

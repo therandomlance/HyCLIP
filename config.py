@@ -9,6 +9,7 @@ class HyCLIP_Config:
 		"API_KEY": None,
 		"HYCLIP_API_URL": "http://localhost:8000",
 		"TAG_SERVICE_KEY": None,
+		"DEFER_TAG": "hyclip:defer",
 		"RATING_SERVICE_KEY": None,
 		"VECTOR_QUANT": "UINT8",
 		"CLIP_MODEL": "ViT-B-16-SigLIP2",

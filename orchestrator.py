@@ -86,6 +86,66 @@ class Orchestrator():
 		return {"status": "ok", "detail": "connected"}
 
 
+	# ===== Hydrus file actions =====
+	def file_metadata(self, hash_id:int) -> dict:
+		"""Tags (display tags, all services), notes and known URLs for one file."""
+		meta = self.HY.get_file_metadata(file_ids=[hash_id], include_notes=True).get("metadata", [])
+		if not meta:
+			raise LookupError(f"hash_id not found in hydrus: {hash_id}")
+		m = meta[0]
+		tags = set()
+		for service in (m.get("tags") or {}).values():
+			tags.update((service.get("display_tags") or {}).get("0", []))
+		return {
+			"hash": m.get("hash"),
+			"tags": sorted(tags),
+			"notes": m.get("notes") or {},
+			"urls": m.get("known_urls") or [],
+		}
+
+	def open_in_hydrus(self, hash_ids:list[int], page_name:str="hyclip") -> dict:
+		"""Add files to the hydrus media page named `page_name` (creating a file search page if none exists) and focus it."""
+		def find(page):
+			if page.get("name") == page_name and page.get("is_media_page", page.get("page_type") != 10):  # 10 = page of pages
+				return page
+			for child in page.get("pages", []):
+				hit = find(child)
+				if hit:
+					return hit
+			return None
+
+		page = find(self.HY.get_pages().get("pages", {}))
+		created = page is None
+		if created:
+			# hydrus_api has no wrapper for /manage_pages/new_page; page_type 6 = file search
+			page = self.HY._api_request("POST", "/manage_pages/new_page",
+				json={"page_type": 6, "page_name": page_name, "focus_page": True}).json()
+		self.HY.add_files_to_page(page["page_key"], file_ids=hash_ids)
+		self.HY.focus_page(page["page_key"])
+		return {"page": page_name, "added": len(hash_ids), "created": created}
+
+	def file_action(self, action:str, hash_ids:list[int], tag:str|None=None, remove_from_bucket:int|None=None) -> dict:
+		"""archive / delete (to hydrus trash) / defer (tag) files, then optionally drop them from a bucket."""
+		if action == "archive":
+			self.HY.archive_files(file_ids=hash_ids)
+		elif action == "delete":
+			self.HY.delete_files(file_ids=hash_ids, reason="hyclip")
+		elif action == "defer":
+			tag = tag or self.CFG.DEFER_TAG
+			self.HY.add_tags(
+				file_ids=hash_ids,
+				service_keys_to_actions_to_tags={self.CFG.TAG_SERVICE_KEY: {TagAction.ADD: [tag]}},
+			)
+		else:
+			raise ValueError(f"unknown action: {action}")
+
+		removed = 0
+		if remove_from_bucket is not None:
+			self.DB.remove_from_bucket(remove_from_bucket, hash_ids)
+			removed = len(hash_ids)
+		return {"action": action, "count": len(hash_ids), "tag": tag, "removed_from_bucket": removed}
+
+
 	# ===== Image Ingest =====
 	def ingest_image(self, hash_id:int, path:str):
 		if self.DB.exists_hash_id(hash_id):

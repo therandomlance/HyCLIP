@@ -72,6 +72,9 @@ def main():
 		assert client.get(url, params={"hash_id": 1}).status_code == 503, f"{url} should 503 without API_KEY"
 	assert client.get("/resolve_hash", params={"hash": "deadbeef"}).status_code == 503, "resolve_hash should 503 without API_KEY"
 	assert client.post("/ingest_enqueue", json={"tag": "hyclip:ingest"}).status_code == 503, "ingest_enqueue should 503 without TAG_SERVICE_KEY"
+	assert client.get("/file_metadata", params={"hash_id": 1}).status_code == 503, "file_metadata should 503 without API_KEY"
+	for url in ["/open_in_hydrus", "/archive_files", "/delete_files", "/defer_files"]:
+		assert client.post(url, json={"hash_ids": [1]}).status_code == 503, f"{url} should 503 without API_KEY"
 
 	# add_hashes_to_bucket: empty hash list short-circuits before reaching hydrus
 	r = client.post("/add_hashes_to_bucket", json={"bucket_id": 1, "hashes": []})

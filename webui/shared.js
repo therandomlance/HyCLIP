@@ -62,7 +62,7 @@ function updateRequires() {
 		if (el.dataset.requires.includes("db") && hyclip.quantizing) why.push("search database is quantizing");
 		if (el.dataset.requires.includes("input") && !hyclip.hasInput) why.push("no enabled prompts or reference images");
 		el.disabled = why.length > 0;
-		el.title = why.length ? `Unavailable: ${why.join("; ")}` : "";
+		el.title = why.length ? `Unavailable: ${why.join("; ")}` : (el.dataset.title ?? "");
 	}
 }
 

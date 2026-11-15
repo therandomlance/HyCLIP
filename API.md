@@ -454,3 +454,29 @@ Resolve sha256 hashes via hydrus: already-ingested files are added to the bucket
 {"added": 3, "pending": [{"hash_id": 222, "path": "/media/img/b.jpg"}], "already_queued": 1, "unknown": ["<sha256>", ...]}
 ```
 `already_queued` counts how many `pending` files are also sitting in the ingest queue (ingesting them dequeues them). `unknown` lists hashes hydrus didn't recognize.
+
+### `GET /file_metadata?hash_id=`
+Tags, notes and known URLs for one file (powers the fullscreen viewer's metadata panel). `tags` is the sorted union of current display tags across all tag services. **404** if hydrus doesn't know the file.
+
+**Response**
+```json
+{"hash": "<sha256>", "tags": ["creator:someone", "species:lopunny"], "notes": {"source": "..."}, "urls": ["https://..."]}
+```
+
+### `POST /open_in_hydrus`
+Add files to the hydrus page named `hyclip` and focus it. If no such page exists, a new file search page named `hyclip` is created first (`created: true`). Needs the hydrus "Manage Pages" permission.
+
+**Request** `{"hash_ids": [1, 2, 3]}` → **Response** `{"page": "hyclip", "added": 3, "created": false}`
+
+### `POST /archive_files` · `POST /delete_files` · `POST /defer_files`
+Selection actions from the search tab. `archive_files` archives (removes from inbox), `delete_files` sends to the hydrus trash (hyclip embeddings are kept), `defer_files` adds `tag` (default config `DEFER_TAG`, `hyclip:defer`) on `TAG_SERVICE_KEY` (else **503**). Optional `remove_from_bucket` also removes the files from that bucket after the hydrus call succeeds (**404** if the bucket doesn't exist).
+
+**Request**
+```json
+{"hash_ids": [1, 2, 3], "tag": "hyclip:defer", "remove_from_bucket": 4}
+```
+
+**Response**
+```json
+{"action": "defer", "count": 3, "tag": "hyclip:defer", "removed_from_bucket": 3}
+```

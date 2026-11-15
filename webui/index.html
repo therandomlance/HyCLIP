@@ -62,9 +62,17 @@
 	<main id="results-area">
 		<div id="results-toolbar">
 			<span id="results-info">No results</span>
+			<button id="select-all" class="btn small" title="Select all results (Ctrl+A)" hidden>Select all</button>
 			<span id="selection-bar" hidden>
 				<span id="selection-count"></span>
 				<button id="clear-selection" class="btn small">Clear selection</button>
+			</span>
+			<span id="selection-actions" hidden>
+				<button id="act-open" class="btn small" data-requires="hydrus" data-title="Add the selection to the &quot;hyclip&quot; page in hydrus">Open in Hydrus</button>
+				<button id="act-archive" class="btn small" data-requires="hydrus" data-title="Archive the selection in hydrus">Archive</button>
+				<button id="act-delete" class="btn small danger" data-requires="hydrus" data-title="Send the selection to the hydrus trash">Delete</button>
+				<button id="act-defer" class="btn small" data-requires="hydrus" data-title="Tag the selection with a defer tag">Defer</button>
+				<label id="act-remove-wrap" class="hint" hidden><input type="checkbox" id="act-remove-bucket"> Remove from bucket</label>
 			</span>
 			<span class="spacer"></span>
 		<label for="thumb-size">Size</label>
@@ -82,9 +90,15 @@
 <footer id="statusbar">Ready</footer>
 
 <div id="overlay" hidden>
-	<button id="viewer-prev" class="viewer-nav" title="Previous (←)">‹</button>
-	<img id="overlay-img" alt="">
-	<button id="viewer-next" class="viewer-nav" title="Next (→)">›</button>
+	<div id="viewer-stage">
+		<button id="viewer-prev" class="viewer-nav" title="Previous (←)">‹</button>
+		<img id="overlay-img" alt="">
+		<button id="viewer-next" class="viewer-nav" title="Next (→)">›</button>
+	</div>
+	<aside id="viewer-meta">
+		<button id="viewer-meta-toggle" class="btn small" title="Show / hide metadata (I)">Info</button>
+		<div id="viewer-meta-body"></div>
+	</aside>
 </div>
 
 <div id="ctx-menu" hidden></div>
